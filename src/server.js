@@ -215,6 +215,7 @@ app.post('/webhook/ses-inbound', async (req, res) => {
 
       const email = await parseSesNotification(message);
       console.log(`[SES Inbound] Email from ${email.from_email}: ${email.subject}`);
+      console.log(`[SES Inbound] Body preview: ${(email.text_body || '').substring(0, 500)}`);
 
       // Skip emails from our own sending address to avoid loops
       const fromEmail = email.from_email.toLowerCase();
