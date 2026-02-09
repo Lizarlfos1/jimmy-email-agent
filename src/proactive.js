@@ -22,19 +22,9 @@ function init() {
     }
   }, { timezone: 'Australia/Sydney' });
 
-  // Run proactive outreach daily at 10am
-  outreachJob = cron.schedule('0 10 * * *', async () => {
-    console.log('[Cron] Running proactive outreach...');
-    try {
-      const count = await runOutreach();
-      await telegram.sendMessage(`📧 Outreach complete. ${count} draft(s) generated.`);
-    } catch (err) {
-      console.error('[Cron] Outreach failed:', err);
-      await telegram.sendMessage(`❌ Outreach failed: ${err.message}`);
-    }
-  }, { timezone: 'Australia/Sydney' });
+  // Outreach cron disabled — run manually via /outreach in Telegram when ready
 
-  console.log('[Cron] Scheduled: sync at 2am AEST, outreach at 10am AEST');
+  console.log('[Cron] Scheduled: sync at 2am AEST');
 }
 
 async function syncContacts() {
