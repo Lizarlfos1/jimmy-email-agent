@@ -34,7 +34,7 @@ async function wpFetch(endpoint, auth) {
 async function fetchFunnelKitContacts(page = 1, perPage = 100) {
   const offset = (page - 1) * perPage;
   const data = await wpFetch(
-    `/wp-json/autonami-app/contacts/listing?per_page=${perPage}&offset=${offset}`
+    `/wp-json/autonami-app/contacts/listing?limit=${perPage}&offset=${offset}`
   );
   return data?.result || [];
 }
