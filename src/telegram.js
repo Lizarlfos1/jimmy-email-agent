@@ -15,6 +15,10 @@ function init() {
     return next();
   });
 
+  bot.catch((err, ctx) => {
+    console.error('[Telegram] Unhandled bot error:', err);
+  });
+
   registerCommands();
   registerCallbacks();
 
@@ -123,77 +127,95 @@ function registerCommands() {
 
 function registerCallbacks() {
   bot.action(/^approve:(\d+)$/, async (ctx) => {
-    const threadId = parseInt(ctx.match[1]);
-    const thread = db.getThread(threadId);
-    if (!thread) {
-      await ctx.answerCbQuery('Thread not found');
-      return;
-    }
-    if (thread.status !== 'pending_approval') {
-      await ctx.answerCbQuery(`Already ${thread.status}`);
-      return;
-    }
-
-    db.updateThreadStatus(threadId, 'approved');
-    await ctx.answerCbQuery('Approved! Sending...');
-    await ctx.editMessageReplyMarkup(undefined); // remove buttons
-
-    // Send the email
     try {
-      const emailSender = require('./emailSender');
-      const contact = db.getContact(thread.contact_id);
-      const result = await emailSender.send({
-        to: contact.email,
-        subject: thread.subject,
-        body: thread.body,
-      });
-      db.updateThreadStatus(threadId, 'sent');
-      db.updateThreadSesId(threadId, result.messageId);
-      db.updateContactLastEmailSent(thread.contact_id);
-      await sendMessage(`✅ Sent to ${contact.name || contact.email}`);
+      const threadId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Approve callback for thread #${threadId}`);
+      const thread = db.getThread(threadId);
+      if (!thread) {
+        await ctx.answerCbQuery('Thread not found');
+        return;
+      }
+      if (thread.status !== 'pending_approval') {
+        await ctx.answerCbQuery(`Already ${thread.status}`);
+        return;
+      }
+
+      db.updateThreadStatus(threadId, 'approved');
+      await ctx.answerCbQuery('Approved! Sending...');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+
+      // Send the email
+      try {
+        const emailSender = require('./emailSender');
+        const contact = db.getContact(thread.contact_id);
+        const result = await emailSender.send({
+          to: contact.email,
+          subject: thread.subject,
+          body: thread.body,
+        });
+        db.updateThreadStatus(threadId, 'sent');
+        db.updateThreadSesId(threadId, result.messageId);
+        db.updateContactLastEmailSent(thread.contact_id);
+        await sendMessage(`✅ Sent to ${contact.name || contact.email}`);
+      } catch (err) {
+        console.error('[Telegram] Send error:', err);
+        db.updateThreadStatus(threadId, 'failed');
+        await sendMessage(`❌ Failed to send thread #${threadId}: ${err.message}`);
+      }
     } catch (err) {
-      console.error('[Telegram] Send error:', err);
-      db.updateThreadStatus(threadId, 'failed');
-      await sendMessage(`❌ Failed to send thread #${threadId}: ${err.message}`);
+      console.error('[Telegram] Approve callback error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
     }
   });
 
   bot.action(/^reject:(\d+)$/, async (ctx) => {
-    const threadId = parseInt(ctx.match[1]);
-    const thread = db.getThread(threadId);
-    if (!thread) {
-      await ctx.answerCbQuery('Thread not found');
-      return;
+    try {
+      const threadId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Reject callback for thread #${threadId}`);
+      const thread = db.getThread(threadId);
+      if (!thread) {
+        await ctx.answerCbQuery('Thread not found');
+        return;
+      }
+      db.updateThreadStatus(threadId, 'rejected');
+      await ctx.answerCbQuery('Rejected');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      await sendMessage(`❌ Draft #${threadId} rejected.`);
+    } catch (err) {
+      console.error('[Telegram] Reject callback error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
     }
-    db.updateThreadStatus(threadId, 'rejected');
-    await ctx.answerCbQuery('Rejected');
-    await ctx.editMessageReplyMarkup(undefined);
-    await sendMessage(`❌ Draft #${threadId} rejected.`);
   });
 
   bot.action(/^edit:(\d+)$/, async (ctx) => {
-    const threadId = parseInt(ctx.match[1]);
-    await ctx.answerCbQuery('Send me the edited email text');
-    await sendMessage(
-      `✏️ Reply to this message with the edited email body for draft #${threadId}.\n` +
-      `The subject line won't change. Just send the new body text.`
-    );
+    try {
+      const threadId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Edit callback for thread #${threadId}`);
+      await ctx.answerCbQuery('Send me the edited email text');
+      await sendMessage(
+        `✏️ Reply to this message with the edited email body for draft #${threadId}.\n` +
+        `The subject line won't change. Just send the new body text.`
+      );
 
-    // Listen for the next text message as the edited body
-    bot.on('text', async function editHandler(editCtx) {
-      if (String(editCtx.chat?.id) !== CHAT_ID()) return;
-      // Remove this one-time listener
-      bot.off('text', editHandler);
+      // Listen for the next text message as the edited body
+      bot.on('text', async function editHandler(editCtx) {
+        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
+        // Remove this one-time listener
+        bot.off('text', editHandler);
 
-      const newBody = editCtx.message.text;
-      db.updateThreadBody(threadId, newBody);
-      db.updateThreadStatus(threadId, 'pending_approval');
+        const newBody = editCtx.message.text;
+        db.updateThreadBody(threadId, newBody);
+        db.updateThreadStatus(threadId, 'pending_approval');
 
-      const thread = db.getThread(threadId);
-      const contact = db.getContact(thread.contact_id);
-      await sendMessage('✅ Draft updated. Resending for approval...');
-      await sendApprovalRequest(contact, thread);
-    });
+        const thread = db.getThread(threadId);
+        const contact = db.getContact(thread.contact_id);
+        await sendMessage('✅ Draft updated. Resending for approval...');
+        await sendApprovalRequest(contact, thread);
+      });
+    } catch (err) {
+      console.error('[Telegram] Edit callback error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
   });
 }
 
