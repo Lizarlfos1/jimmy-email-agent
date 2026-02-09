@@ -30,31 +30,25 @@ async function wpFetch(endpoint, auth) {
   return res.json();
 }
 
-// Fetch contacts from FunnelKit Automations
+// Fetch contacts from FunnelKit Automations (autonami-app)
 async function fetchFunnelKitContacts(page = 1, perPage = 100) {
-  try {
-    const data = await wpFetch(
-      `/wp-json/fkautomation/v2/contacts?per_page=${perPage}&page=${page}`
-    );
-    return data;
-  } catch (err) {
-    // FunnelKit API might have a different structure — try alternate endpoint
-    console.warn('[WP] FunnelKit contacts endpoint failed, trying alternate:', err.message);
-    try {
-      const data = await wpFetch(
-        `/wp-json/wp/v2/fk_contacts?per_page=${perPage}&page=${page}`
-      );
-      return data;
-    } catch (err2) {
-      console.error('[WP] Both FunnelKit endpoints failed:', err2.message);
-      return [];
-    }
-  }
+  const offset = (page - 1) * perPage;
+  const data = await wpFetch(
+    `/wp-json/autonami-app/contacts/listing?per_page=${perPage}&offset=${offset}`
+  );
+  return data?.result || [];
 }
 
 // Fetch a single contact from FunnelKit by ID
 async function fetchFunnelKitContact(contactId) {
-  return wpFetch(`/wp-json/fkautomation/v2/contacts/${contactId}`);
+  return wpFetch(`/wp-json/autonami-app/contacts/${contactId}`);
+}
+
+// Parse total spent from FunnelKit HTML price string (e.g. "<span...>$36.99</span>")
+function parsePriceHtml(html) {
+  if (!html) return 0;
+  const match = String(html).match(/[\d,.]+/);
+  return match ? parseFloat(match[0].replace(/,/g, '')) : 0;
 }
 
 // Fetch orders from WooCommerce
@@ -104,53 +98,51 @@ async function buildCustomerProfile(email) {
   };
 }
 
-// Sync all contacts from FunnelKit + WooCommerce into our database
+// Sync all contacts from FunnelKit into our database
 async function syncAllContacts() {
   let page = 1;
   let totalSynced = 0;
+  const perPage = 100;
 
   while (true) {
-    const contacts = await fetchFunnelKitContacts(page, 100);
+    const contacts = await fetchFunnelKitContacts(page, perPage);
     if (!contacts || contacts.length === 0) break;
 
-    for (const fkContact of contacts) {
-      const email = fkContact.email || fkContact.contact_email;
+    for (const c of contacts) {
+      const email = c.email;
       if (!email) continue;
 
-      const name = fkContact.name || fkContact.first_name
-        ? `${fkContact.first_name || ''} ${fkContact.last_name || ''}`.trim()
-        : null;
+      const name = [c.f_name, c.l_name].filter(Boolean).join(' ') || null;
 
-      const tags = Array.isArray(fkContact.tags)
-        ? fkContact.tags.map(t => typeof t === 'string' ? t : t.name || t.tag)
+      const tags = Array.isArray(c.tags)
+        ? c.tags.map(t => typeof t === 'string' ? t : t.name || t.tag)
         : [];
 
-      // Enrich with WooCommerce order data
-      let profile = { purchases: [], totalSpent: 0 };
-      try {
-        profile = await buildCustomerProfile(email);
-      } catch (err) {
-        console.warn(`[WP] Failed to build profile for ${email}:`, err.message);
-      }
+      // FunnelKit already provides purchased products
+      const purchases = Array.isArray(c.purchased_products)
+        ? c.purchased_products.map(p => resolveProductId(p.name) || p.name)
+        : [];
+
+      const totalSpent = parsePriceHtml(c.total_order_value);
 
       db.upsertContact({
         email,
         name,
-        wpContactId: String(fkContact.id || fkContact.contact_id || ''),
+        wpContactId: String(c.id || ''),
         tags,
-        purchases: profile.purchases,
-        totalSpent: profile.totalSpent,
+        purchases,
+        totalSpent,
       });
 
       totalSynced++;
     }
 
-    // If we got fewer than requested, we've hit the last page
-    if (contacts.length < 100) break;
+    console.log(`[WP] Synced page ${page} (${contacts.length} contacts)`);
+    if (contacts.length < perPage) break;
     page++;
   }
 
-  console.log(`[WP] Synced ${totalSynced} contacts`);
+  console.log(`[WP] Synced ${totalSynced} contacts total`);
   return totalSynced;
 }
 
