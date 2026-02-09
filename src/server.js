@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+// Fix Node.js 20 Happy Eyeballs bug causing ETIMEDOUT on some hosts
+require('net').setDefaultAutoSelectFamily(false);
+
 const express = require('express');
 const crypto = require('crypto');
 const db = require('./database');
@@ -9,9 +12,11 @@ const emailSender = require('./emailSender');
 const wordpress = require('./wordpress');
 const proactive = require('./proactive');
 const { resolveProductId } = require('./config');
+const { parseSesNotification, validateSnsMessage } = require('./sesInbound');
 
 const app = express();
-app.use(express.json());
+// SNS sends with text/plain content-type, so we need to parse that as JSON too
+app.use(express.json({ type: ['application/json', 'text/plain'] }));
 
 // --- Webhook authentication middleware ---
 function verifyWebhook(req, res, next) {
@@ -173,6 +178,133 @@ app.post('/webhook/contact-event', verifyWebhook, async (req, res) => {
     res.json({ status: 'ok' });
   } catch (err) {
     console.error('[Webhook] Contact event error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- SES Inbound Email (via SNS) ---
+app.post('/webhook/ses-inbound', async (req, res) => {
+  try {
+    const body = req.body;
+
+    // Validate it's from SNS
+    if (!validateSnsMessage(body)) {
+      return res.status(400).json({ error: 'Invalid SNS message' });
+    }
+
+    // Handle SNS subscription confirmation
+    if (body.Type === 'SubscriptionConfirmation') {
+      console.log('[SES Inbound] Confirming SNS subscription...');
+      const response = await fetch(body.SubscribeURL);
+      if (response.ok) {
+        console.log('[SES Inbound] SNS subscription confirmed');
+        return res.json({ status: 'confirmed' });
+      }
+      throw new Error('Failed to confirm SNS subscription');
+    }
+
+    // Handle actual email notification
+    if (body.Type === 'Notification') {
+      const message = typeof body.Message === 'string' ? JSON.parse(body.Message) : body.Message;
+
+      // SES notification types: 'Received' is what we want
+      if (message.notificationType !== 'Received') {
+        console.log(`[SES Inbound] Ignoring notification type: ${message.notificationType}`);
+        return res.json({ status: 'ignored' });
+      }
+
+      const email = await parseSesNotification(message);
+      console.log(`[SES Inbound] Email from ${email.from_email}: ${email.subject}`);
+
+      // Skip emails from our own sending address to avoid loops
+      const fromEmail = email.from_email.toLowerCase();
+      if (fromEmail === (process.env.SES_FROM_EMAIL || '').toLowerCase()) {
+        console.log('[SES Inbound] Skipping email from self');
+        return res.json({ status: 'skipped', reason: 'self' });
+      }
+
+      // Upsert contact
+      const contact = db.upsertContact({
+        email: email.from_email,
+        name: email.from_name || undefined,
+      });
+
+      if (contact.blacklisted) {
+        console.log(`[SES Inbound] Skipping blacklisted: ${email.from_email}`);
+        return res.json({ status: 'skipped', reason: 'blacklisted' });
+      }
+
+      // Save inbound thread
+      db.createThread({
+        contactId: contact.id,
+        direction: 'inbound',
+        subject: email.subject,
+        body: email.text_body,
+        status: 'received',
+      });
+      db.updateContactLastEmailReceived(contact.id);
+
+      // Refresh profile from WooCommerce
+      try {
+        await wordpress.refreshContactProfile(email.from_email);
+      } catch (err) {
+        console.warn(`[SES Inbound] Profile refresh failed:`, err.message);
+      }
+
+      const freshContact = db.getContactByEmail(email.from_email);
+      const threadHistory = db.getThreadsByContact(freshContact.id, 10);
+
+      // Generate reply
+      const draft = await emailBrain.generateReply({
+        contact: freshContact,
+        inboundSubject: email.subject,
+        inboundBody: email.text_body,
+        threadHistory,
+      });
+
+      const replyThread = db.createThread({
+        contactId: freshContact.id,
+        direction: 'outbound',
+        subject: draft.subject,
+        body: draft.body,
+        status: 'pending_approval',
+        claudeReasoning: draft.reasoning,
+      });
+
+      // Auto-approve or send for approval
+      if (db.isAutoApprove()) {
+        const rateCheck = db.canEmailContact(freshContact.id);
+        if (!rateCheck.allowed) {
+          await telegram.sendMessage(
+            `⚠️ Auto-send blocked for ${freshContact.email}: ${rateCheck.reason}\nDraft saved as #${replyThread.id}`
+          );
+          return res.json({ status: 'rate_limited', threadId: replyThread.id });
+        }
+
+        try {
+          const result = await emailSender.send({
+            to: freshContact.email,
+            subject: draft.subject,
+            body: draft.body,
+          });
+          db.updateThreadStatus(replyThread.id, 'sent');
+          db.updateThreadSesId(replyThread.id, result.messageId);
+          db.updateContactLastEmailSent(freshContact.id);
+          await telegram.sendAutoApproveNotification(freshContact, replyThread);
+        } catch (err) {
+          db.updateThreadStatus(replyThread.id, 'failed');
+          await telegram.sendMessage(`❌ Auto-send failed: ${err.message}`);
+        }
+      } else {
+        await telegram.sendApprovalRequest(freshContact, replyThread);
+      }
+
+      return res.json({ status: 'ok', threadId: replyThread.id });
+    }
+
+    res.json({ status: 'ok' });
+  } catch (err) {
+    console.error('[SES Inbound] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
