@@ -1,6 +1,12 @@
 const { Telegraf, Markup } = require('telegraf');
 const db = require('./database');
 
+// Escape special chars for Telegram Markdown v1: _ * ` [
+function escapeMd(text) {
+  if (!text) return '';
+  return String(text).replace(/([_*`\[])/g, '\\$1');
+}
+
 let bot;
 let proactiveModule; // lazy-loaded to avoid circular deps
 
@@ -365,12 +371,12 @@ async function sendApprovalRequest(contact, thread) {
 
   const text =
     `📧 *New Email Draft*\n\n` +
-    `*To:* ${contact.name || 'Unknown'} <${contact.email}>\n` +
-    `*Purchases:* ${purchaseSummary}\n` +
+    `*To:* ${escapeMd(contact.name || 'Unknown')} <${escapeMd(contact.email)}>\n` +
+    `*Purchases:* ${escapeMd(purchaseSummary)}\n` +
     `*Total spent:* $${(contact.total_spent || 0).toFixed(2)}\n\n` +
-    `*Subject:* ${thread.subject || '(no subject)'}\n\n` +
-    `---\n${thread.body}\n---\n\n` +
-    (thread.claude_reasoning ? `💡 *Strategy:* ${thread.claude_reasoning}\n\n` : '') +
+    `*Subject:* ${escapeMd(thread.subject || '(no subject)')}\n\n` +
+    `---\n${escapeMd(thread.body)}\n---\n\n` +
+    (thread.claude_reasoning ? `💡 *Strategy:* ${escapeMd(thread.claude_reasoning)}\n\n` : '') +
     `Draft #${thread.id}`;
 
   const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
@@ -393,9 +399,9 @@ async function sendBroadcastApproval(broadcast) {
   const text =
     `📢 *Broadcast Email Draft*\n\n` +
     `*Recipients:* ${contacts.length} contacts\n` +
-    `*Subject:* ${broadcast.subject || '(no subject)'}\n\n` +
-    `---\n${broadcast.body}\n---\n\n` +
-    (broadcast.claude_reasoning ? `💡 *Strategy:* ${broadcast.claude_reasoning}\n\n` : '') +
+    `*Subject:* ${escapeMd(broadcast.subject || '(no subject)')}\n\n` +
+    `---\n${escapeMd(broadcast.body)}\n---\n\n` +
+    (broadcast.claude_reasoning ? `💡 *Strategy:* ${escapeMd(broadcast.claude_reasoning)}\n\n` : '') +
     `Broadcast #${broadcast.id}`;
 
   const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
@@ -416,10 +422,10 @@ async function sendBroadcastApproval(broadcast) {
 async function sendTestBroadcastApproval(broadcast, testEmails) {
   const text =
     `🧪 *TEST Broadcast Email Draft*\n\n` +
-    `*Test recipients:* ${testEmails.join(', ')}\n` +
-    `*Subject:* ${broadcast.subject || '(no subject)'}\n\n` +
-    `---\n${broadcast.body}\n---\n\n` +
-    (broadcast.claude_reasoning ? `💡 *Strategy:* ${broadcast.claude_reasoning}\n\n` : '') +
+    `*Test recipients:* ${escapeMd(testEmails.join(', '))}\n` +
+    `*Subject:* ${escapeMd(broadcast.subject || '(no subject)')}\n\n` +
+    `---\n${escapeMd(broadcast.body)}\n---\n\n` +
+    (broadcast.claude_reasoning ? `💡 *Strategy:* ${escapeMd(broadcast.claude_reasoning)}\n\n` : '') +
     `Broadcast #${broadcast.id}`;
 
   const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
@@ -446,10 +452,10 @@ async function sendMessage(text, parseMode = 'Markdown') {
 async function sendAutoApproveNotification(contact, thread) {
   const text =
     `📨 *Auto-sent Email*\n\n` +
-    `*To:* ${contact.name || 'Unknown'} <${contact.email}>\n` +
-    `*Subject:* ${thread.subject || '(no subject)'}\n\n` +
-    `---\n${thread.body}\n---\n\n` +
-    (thread.claude_reasoning ? `💡 *Strategy:* ${thread.claude_reasoning}\n` : '') +
+    `*To:* ${escapeMd(contact.name || 'Unknown')} <${escapeMd(contact.email)}>\n` +
+    `*Subject:* ${escapeMd(thread.subject || '(no subject)')}\n\n` +
+    `---\n${escapeMd(thread.body)}\n---\n\n` +
+    (thread.claude_reasoning ? `💡 *Strategy:* ${escapeMd(thread.claude_reasoning)}\n` : '') +
     `Draft #${thread.id}`;
 
   await bot.telegram.sendMessage(CHAT_ID(), text, { parse_mode: 'Markdown' });
