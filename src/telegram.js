@@ -144,6 +144,65 @@ function registerCommands() {
     }
   });
 
+  bot.command('analytics', async (ctx) => {
+    const arg = ctx.message.text.split(' ')[1];
+    const days = parseInt(arg, 10) || 30;
+
+    const stats = db.getAnalytics({ days });
+
+    const indRate = stats.individual.sent > 0
+      ? ((stats.individual.opened / stats.individual.sent) * 100).toFixed(1)
+      : '0.0';
+    const indClickRate = stats.individual.sent > 0
+      ? ((stats.individual.clicked / stats.individual.sent) * 100).toFixed(1)
+      : '0.0';
+
+    const bcRate = stats.broadcast.sent > 0
+      ? ((stats.broadcast.opened / stats.broadcast.sent) * 100).toFixed(1)
+      : '0.0';
+    const bcClickRate = stats.broadcast.sent > 0
+      ? ((stats.broadcast.clicked / stats.broadcast.sent) * 100).toFixed(1)
+      : '0.0';
+
+    let broadcastLines = '';
+    if (stats.broadcastBreakdown.length > 0) {
+      broadcastLines = '\n\n*Recent Broadcasts:*\n' +
+        stats.broadcastBreakdown.map(b => {
+          const openPct = b.sent > 0 ? ((b.opened / b.sent) * 100).toFixed(0) : 0;
+          const clickPct = b.sent > 0 ? ((b.clicked / b.sent) * 100).toFixed(0) : 0;
+          const subj = escapeMd((b.subject || '').slice(0, 30));
+          return `#${b.id} "${subj}" — ${b.sent} sent, ${openPct}% opened, ${clickPct}% clicked`;
+        }).join('\n');
+    }
+
+    let topLinkLines = '';
+    if (stats.topLinks.length > 0) {
+      topLinkLines = '\n\n*Top Clicked Links:*\n' +
+        stats.topLinks.map(l => {
+          const shortUrl = escapeMd(l.original_url.replace('https://jimmygrills.com', '').slice(0, 40));
+          return `${shortUrl} — ${l.clicks} clicks`;
+        }).join('\n');
+    }
+
+    const msg =
+      `*Analytics (last ${days} days)*\n\n` +
+      `*Individual Emails:*\n` +
+      `Sent: ${stats.individual.sent}\n` +
+      `Opened: ${stats.individual.opened} (${indRate}%)\n` +
+      `Clicked: ${stats.individual.clicked} (${indClickRate}%)\n\n` +
+      `*Broadcasts:*\n` +
+      `Sent: ${stats.broadcast.sent}\n` +
+      `Opened: ${stats.broadcast.opened} (${bcRate}%)\n` +
+      `Clicked: ${stats.broadcast.clicked} (${bcClickRate}%)\n\n` +
+      `*Purchase Attribution:*\n` +
+      `Purchases: ${stats.attributedPurchases.count}\n` +
+      `Revenue: $${stats.attributedPurchases.revenue.toFixed(2)}` +
+      broadcastLines +
+      topLinkLines;
+
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+  });
+
   bot.command('pending', async (ctx) => {
     const pending = db.getPendingApprovals();
     if (pending.length === 0) {
@@ -180,11 +239,18 @@ function registerCallbacks() {
       // Send the email
       try {
         const emailSender = require('./emailSender');
+        const tracking = require('./tracking');
         const contact = db.getContact(thread.contact_id);
+        const tracked = tracking.prepareTrackedEmail({
+          contactId: contact.id,
+          threadId: threadId,
+          body: thread.body,
+        });
         const result = await emailSender.send({
           to: contact.email,
           subject: thread.subject,
-          body: thread.body,
+          body: tracked.textBody,
+          htmlBody: tracked.htmlBody,
         });
         db.updateThreadStatus(threadId, 'sent');
         db.updateThreadSesId(threadId, result.messageId);

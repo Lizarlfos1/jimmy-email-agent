@@ -13,6 +13,7 @@ const wordpress = require('./wordpress');
 const proactive = require('./proactive');
 const { resolveProductId } = require('./config');
 const { parseSesNotification, validateSnsMessage } = require('./sesInbound');
+const tracking = require('./tracking');
 
 const app = express();
 // SNS sends with text/plain content-type, so we need to parse that as JSON too
@@ -113,10 +114,16 @@ app.post('/webhook/inbound-email', verifyWebhook, async (req, res) => {
       }
 
       try {
+        const tracked = tracking.prepareTrackedEmail({
+          contactId: freshContact.id,
+          threadId: replyThread.id,
+          body: draft.body,
+        });
         const result = await emailSender.send({
           to: freshContact.email,
           subject: draft.subject,
-          body: draft.body,
+          body: tracked.textBody,
+          htmlBody: tracked.htmlBody,
         });
         db.updateThreadStatus(replyThread.id, 'sent');
         db.updateThreadSesId(replyThread.id, result.messageId);
@@ -157,8 +164,48 @@ app.post('/webhook/contact-event', verifyWebhook, async (req, res) => {
         await wordpress.refreshContactProfile(email);
         const contact = db.getContactByEmail(email);
         if (contact) {
+          // Purchase attribution — try UTM token first (direct), then time-window (fallback)
+          const orderTotal = data?.total ? parseFloat(data.total) : 0;
+          const orderProducts = data?.products || data?.line_items?.map(i => i.name) || [];
+          const utmToken = data?.meta?._jg_utm_content || data?.utm_content;
+
+          let trackingRecord = null;
+          let attributionMethod = '';
+
+          // 1. Direct attribution via UTM token from checkout
+          if (utmToken) {
+            trackingRecord = db.getTrackingByToken(utmToken);
+            if (trackingRecord) attributionMethod = 'utm';
+          }
+
+          // 2. Fallback: time-window attribution
+          if (!trackingRecord) {
+            const attributionDays = parseInt(process.env.PURCHASE_ATTRIBUTION_DAYS || '7', 10);
+            trackingRecord = db.getRecentTrackingForContact(contact.id, attributionDays);
+            if (trackingRecord) attributionMethod = 'time-window';
+          }
+
+          let attributionNote = '';
+          if (trackingRecord) {
+            db.createPurchaseAttribution({
+              contactId: contact.id,
+              trackingId: trackingRecord.id,
+              orderTotal,
+              products: orderProducts,
+            });
+
+            const method = attributionMethod === 'utm' ? '(direct link)' : '(time-window)';
+            if (trackingRecord.broadcast_id) {
+              const bc = db.getBroadcast(trackingRecord.broadcast_id);
+              attributionNote = `\n📊 Attributed ${method} to broadcast #${trackingRecord.broadcast_id}: "${bc?.subject || 'Unknown'}"`;
+            } else if (trackingRecord.thread_id) {
+              attributionNote = `\n📊 Attributed ${method} to email thread #${trackingRecord.thread_id}`;
+            }
+          }
+
           await telegram.sendMessage(
-            `🛒 New purchase by ${contact.name || email}\nProducts: ${contact.purchases.join(', ')}\nTotal: $${contact.total_spent.toFixed(2)}`
+            `🛒 New purchase by ${contact.name || email}\nProducts: ${contact.purchases.join(', ')}\nTotal: $${contact.total_spent.toFixed(2)}` +
+            attributionNote
           );
         }
         break;
@@ -282,10 +329,16 @@ app.post('/webhook/ses-inbound', async (req, res) => {
         }
 
         try {
+          const tracked = tracking.prepareTrackedEmail({
+            contactId: freshContact.id,
+            threadId: replyThread.id,
+            body: draft.body,
+          });
           const result = await emailSender.send({
             to: freshContact.email,
             subject: draft.subject,
-            body: draft.body,
+            body: tracked.textBody,
+            htmlBody: tracked.htmlBody,
           });
           db.updateThreadStatus(replyThread.id, 'sent');
           db.updateThreadSesId(replyThread.id, result.messageId);
@@ -307,6 +360,49 @@ app.post('/webhook/ses-inbound', async (req, res) => {
     console.error('[SES Inbound] Error:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Tracking pixel (open tracking) ---
+app.get('/t/open/:token', (req, res) => {
+  try {
+    db.recordOpen(req.params.token);
+  } catch (err) {
+    console.error('[Tracking] Open recording error:', err.message);
+  }
+
+  const pixel = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64'
+  );
+  res.set({
+    'Content-Type': 'image/gif',
+    'Content-Length': pixel.length,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  });
+  res.end(pixel);
+});
+
+// --- Click tracking redirect ---
+app.get('/t/click/:token', (req, res) => {
+  const { token } = req.params;
+  const originalUrl = req.query.url;
+
+  if (!originalUrl) {
+    return res.status(400).send('Missing URL');
+  }
+
+  try {
+    const trackingRecord = db.getTrackingByToken(token);
+    if (trackingRecord) {
+      db.recordClick({ trackingId: trackingRecord.id, originalUrl });
+    }
+  } catch (err) {
+    console.error('[Tracking] Click recording error:', err.message);
+  }
+
+  res.redirect(302, originalUrl);
 });
 
 // --- Start ---

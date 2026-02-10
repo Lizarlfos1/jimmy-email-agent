@@ -76,9 +76,48 @@ function init() {
       value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS email_tracking (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token TEXT UNIQUE NOT NULL,
+      contact_id INTEGER NOT NULL,
+      thread_id INTEGER,
+      broadcast_id INTEGER,
+      first_opened_at TEXT,
+      open_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (contact_id) REFERENCES contacts(id),
+      FOREIGN KEY (thread_id) REFERENCES email_threads(id),
+      FOREIGN KEY (broadcast_id) REFERENCES broadcasts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS tracking_clicks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tracking_id INTEGER NOT NULL,
+      original_url TEXT NOT NULL,
+      clicked_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (tracking_id) REFERENCES email_tracking(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_attributions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contact_id INTEGER NOT NULL,
+      tracking_id INTEGER NOT NULL,
+      order_total REAL DEFAULT 0,
+      products TEXT DEFAULT '[]',
+      attributed_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (contact_id) REFERENCES contacts(id),
+      FOREIGN KEY (tracking_id) REFERENCES email_tracking(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
     CREATE INDEX IF NOT EXISTS idx_threads_contact ON email_threads(contact_id);
     CREATE INDEX IF NOT EXISTS idx_threads_status ON email_threads(status);
+    CREATE INDEX IF NOT EXISTS idx_tracking_token ON email_tracking(token);
+    CREATE INDEX IF NOT EXISTS idx_tracking_contact ON email_tracking(contact_id);
+    CREATE INDEX IF NOT EXISTS idx_tracking_thread ON email_tracking(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_tracking_broadcast ON email_tracking(broadcast_id);
+    CREATE INDEX IF NOT EXISTS idx_clicks_tracking ON tracking_clicks(tracking_id);
+    CREATE INDEX IF NOT EXISTS idx_attributions_contact ON purchase_attributions(contact_id);
   `);
 
   // Seed default settings
@@ -357,6 +396,129 @@ function getStats() {
   return { totalContacts, blacklisted, pendingApprovals, sentToday, sentThisWeek, autoApprove: isAutoApprove() };
 }
 
+// --- Email Tracking ---
+
+function createTrackingToken({ contactId, threadId, broadcastId }) {
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(16).toString('hex');
+  const result = db.prepare(
+    'INSERT INTO email_tracking (token, contact_id, thread_id, broadcast_id) VALUES (?, ?, ?, ?)'
+  ).run(token, contactId, threadId || null, broadcastId || null);
+  return { id: result.lastInsertRowid, token };
+}
+
+function getTrackingByToken(token) {
+  return db.prepare('SELECT * FROM email_tracking WHERE token = ?').get(token);
+}
+
+function recordOpen(token) {
+  db.prepare(`
+    UPDATE email_tracking
+    SET open_count = open_count + 1,
+        first_opened_at = COALESCE(first_opened_at, datetime('now'))
+    WHERE token = ?
+  `).run(token);
+}
+
+function recordClick({ trackingId, originalUrl }) {
+  db.prepare(
+    'INSERT INTO tracking_clicks (tracking_id, original_url) VALUES (?, ?)'
+  ).run(trackingId, originalUrl);
+}
+
+function createPurchaseAttribution({ contactId, trackingId, orderTotal, products }) {
+  db.prepare(
+    'INSERT INTO purchase_attributions (contact_id, tracking_id, order_total, products) VALUES (?, ?, ?, ?)'
+  ).run(contactId, trackingId, orderTotal || 0, JSON.stringify(products || []));
+}
+
+function getRecentTrackingForContact(contactId, days) {
+  return db.prepare(`
+    SELECT * FROM email_tracking
+    WHERE contact_id = ? AND created_at >= datetime('now', '-' || ? || ' days')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(contactId, days);
+}
+
+function getAnalytics({ days = 30 } = {}) {
+  const cutoff = `-${days} days`;
+
+  const individualSent = db.prepare(`
+    SELECT COUNT(*) as c FROM email_tracking
+    WHERE thread_id IS NOT NULL AND created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const individualOpened = db.prepare(`
+    SELECT COUNT(*) as c FROM email_tracking
+    WHERE thread_id IS NOT NULL AND open_count > 0 AND created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const individualClicked = db.prepare(`
+    SELECT COUNT(DISTINCT et.id) as c FROM email_tracking et
+    INNER JOIN tracking_clicks tc ON tc.tracking_id = et.id
+    WHERE et.thread_id IS NOT NULL AND et.created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const broadcastSent = db.prepare(`
+    SELECT COUNT(*) as c FROM email_tracking
+    WHERE broadcast_id IS NOT NULL AND created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const broadcastOpened = db.prepare(`
+    SELECT COUNT(*) as c FROM email_tracking
+    WHERE broadcast_id IS NOT NULL AND open_count > 0 AND created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const broadcastClicked = db.prepare(`
+    SELECT COUNT(DISTINCT et.id) as c FROM email_tracking et
+    INNER JOIN tracking_clicks tc ON tc.tracking_id = et.id
+    WHERE et.broadcast_id IS NOT NULL AND et.created_at >= datetime('now', ?)
+  `).get(cutoff).c;
+
+  const attributedPurchases = db.prepare(`
+    SELECT COUNT(*) as count, COALESCE(SUM(order_total), 0) as revenue
+    FROM purchase_attributions
+    WHERE attributed_at >= datetime('now', ?)
+  `).get(cutoff);
+
+  const topLinks = db.prepare(`
+    SELECT original_url, COUNT(*) as clicks
+    FROM tracking_clicks tc
+    INNER JOIN email_tracking et ON et.id = tc.tracking_id
+    WHERE et.created_at >= datetime('now', ?)
+    GROUP BY original_url
+    ORDER BY clicks DESC
+    LIMIT 5
+  `).all(cutoff);
+
+  const broadcastBreakdown = db.prepare(`
+    SELECT
+      b.id,
+      b.subject,
+      b.created_at,
+      COUNT(et.id) as sent,
+      SUM(CASE WHEN et.open_count > 0 THEN 1 ELSE 0 END) as opened,
+      (SELECT COUNT(DISTINCT tc2.tracking_id) FROM tracking_clicks tc2
+       INNER JOIN email_tracking et2 ON et2.id = tc2.tracking_id
+       WHERE et2.broadcast_id = b.id) as clicked
+    FROM broadcasts b
+    LEFT JOIN email_tracking et ON et.broadcast_id = b.id
+    WHERE b.status = 'sent' AND b.created_at >= datetime('now', ?)
+    GROUP BY b.id
+    ORDER BY b.created_at DESC
+    LIMIT 10
+  `).all(cutoff);
+
+  return {
+    individual: { sent: individualSent, opened: individualOpened, clicked: individualClicked },
+    broadcast: { sent: broadcastSent, opened: broadcastOpened, clicked: broadcastClicked },
+    attributedPurchases: { count: attributedPurchases.count, revenue: attributedPurchases.revenue },
+    topLinks,
+    broadcastBreakdown,
+  };
+}
+
 function getDb() {
   return db;
 }
@@ -395,4 +557,11 @@ module.exports = {
   updateBroadcastProgress,
   getPendingBroadcast,
   getStats,
+  createTrackingToken,
+  getTrackingByToken,
+  recordOpen,
+  recordClick,
+  createPurchaseAttribution,
+  getRecentTrackingForContact,
+  getAnalytics,
 };

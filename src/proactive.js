@@ -5,6 +5,7 @@ const emailSender = require('./emailSender');
 const telegram = require('./telegram');
 const wordpress = require('./wordpress');
 const { getUpsellRecommendation } = require('./config');
+const tracking = require('./tracking');
 
 let syncJob;
 let outreachJob;
@@ -89,10 +90,16 @@ async function runOutreach() {
     // Auto-approve or send for approval
     if (db.isAutoApprove()) {
       try {
+        const tracked = tracking.prepareTrackedEmail({
+          contactId: contact.id,
+          threadId: thread.id,
+          body: draft.body,
+        });
         const result = await emailSender.send({
           to: contact.email,
           subject: draft.subject,
-          body: draft.body,
+          body: tracked.textBody,
+          htmlBody: tracked.htmlBody,
         });
         db.updateThreadStatus(thread.id, 'sent');
         db.updateThreadSesId(thread.id, result.messageId);
@@ -156,10 +163,16 @@ async function sendBroadcastToAll(broadcastId) {
   for (let i = 0; i < contacts.length; i++) {
     const contact = contacts[i];
     try {
+      const tracked = tracking.prepareTrackedEmail({
+        contactId: contact.id,
+        broadcastId: broadcastId,
+        body: broadcast.body,
+      });
       await emailSender.send({
         to: contact.email,
         subject: broadcast.subject,
-        body: broadcast.body,
+        body: tracked.textBody,
+        htmlBody: tracked.htmlBody,
       });
       sent++;
     } catch (err) {

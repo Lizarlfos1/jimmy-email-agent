@@ -13,18 +13,23 @@ function init() {
   console.log('[SES] Initialized');
 }
 
-async function send({ to, subject, body, replyTo }) {
+async function send({ to, subject, body, htmlBody, replyTo }) {
   const fromName = process.env.SES_FROM_NAME || 'Jimmy Grills';
   const fromEmail = process.env.SES_FROM_EMAIL;
+
+  const emailBody = {
+    Text: { Data: body, Charset: 'UTF-8' },
+  };
+  if (htmlBody) {
+    emailBody.Html = { Data: htmlBody, Charset: 'UTF-8' };
+  }
 
   const params = {
     Source: `${fromName} <${fromEmail}>`,
     Destination: { ToAddresses: [to] },
     Message: {
       Subject: { Data: subject, Charset: 'UTF-8' },
-      Body: {
-        Text: { Data: body, Charset: 'UTF-8' },
-      },
+      Body: emailBody,
     },
   };
 
