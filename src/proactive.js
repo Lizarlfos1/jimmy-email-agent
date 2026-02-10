@@ -113,7 +113,7 @@ async function runOutreach() {
   return draftsGenerated;
 }
 
-async function generateBroadcast() {
+async function generateBroadcast({ testEmails } = {}) {
   const contacts = db.getNonBlacklistedContacts();
 
   let draft;
@@ -128,11 +128,16 @@ async function generateBroadcast() {
     subject: draft.subject,
     body: draft.body,
     claudeReasoning: draft.reasoning,
-    totalContacts: contacts.length,
+    totalContacts: testEmails ? testEmails.length : contacts.length,
   });
 
-  console.log(`[Broadcast] Generated #${broadcast.id} for ${contacts.length} contacts`);
-  await telegram.sendBroadcastApproval(broadcast);
+  if (testEmails) {
+    console.log(`[Broadcast] Generated TEST #${broadcast.id} for ${testEmails.length} test email(s)`);
+    await telegram.sendTestBroadcastApproval(broadcast, testEmails);
+  } else {
+    console.log(`[Broadcast] Generated #${broadcast.id} for ${contacts.length} contacts`);
+    await telegram.sendBroadcastApproval(broadcast);
+  }
   return broadcast;
 }
 
@@ -185,4 +190,40 @@ async function sendBroadcastToAll(broadcastId) {
   return { sent, failed, total: contacts.length };
 }
 
-module.exports = { init, syncContacts, runOutreach, generateBroadcast, sendBroadcastToAll };
+async function sendBroadcastTest(broadcastId, testEmails) {
+  const broadcast = db.getBroadcast(broadcastId);
+  if (!broadcast) throw new Error('Broadcast not found');
+
+  db.updateBroadcastStatus(broadcastId, 'sending');
+
+  let sent = 0;
+  let failed = 0;
+
+  await telegram.sendMessage(`🧪 Sending test broadcast #${broadcastId} to ${testEmails.length} email(s)...`);
+
+  for (const email of testEmails) {
+    try {
+      await emailSender.send({
+        to: email,
+        subject: broadcast.subject,
+        body: broadcast.body,
+      });
+      sent++;
+    } catch (err) {
+      console.error(`[Broadcast Test] Failed to send to ${email}:`, err.message);
+      failed++;
+    }
+  }
+
+  db.updateBroadcastProgress(broadcastId, sent, failed);
+  db.updateBroadcastStatus(broadcastId, 'sent');
+
+  await telegram.sendMessage(
+    `🧪 Test broadcast #${broadcastId} complete!\n` +
+    `Sent: ${sent} | Failed: ${failed} | Total: ${testEmails.length}`
+  );
+
+  return { sent, failed, total: testEmails.length };
+}
+
+module.exports = { init, syncContacts, runOutreach, generateBroadcast, sendBroadcastToAll, sendBroadcastTest };

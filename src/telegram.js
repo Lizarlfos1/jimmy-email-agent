@@ -122,6 +122,22 @@ function registerCommands() {
     }
   });
 
+  bot.command('testbroadcast', async (ctx) => {
+    const testEmails = (process.env.TEST_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+    if (testEmails.length === 0) {
+      await ctx.reply('❌ No TEST_EMAILS configured in .env. Set TEST_EMAILS=email1@example.com,email2@example.com');
+      return;
+    }
+    await ctx.reply(`🔄 Generating test broadcast (will send to ${testEmails.length} test email(s) only)...`);
+    try {
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      await proactiveModule.generateBroadcast({ testEmails });
+    } catch (err) {
+      console.error('[Telegram] Test broadcast error:', err);
+      await ctx.reply(`❌ Test broadcast generation failed: ${err.message}`);
+    }
+  });
+
   bot.command('pending', async (ctx) => {
     const pending = db.getPendingApprovals();
     if (pending.length === 0) {
@@ -199,6 +215,36 @@ function registerCallbacks() {
   });
 
   // --- Broadcast callbacks ---
+
+  bot.action(/^approve_test_bc:(\d+)$/, async (ctx) => {
+    try {
+      const broadcastId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Approve TEST broadcast #${broadcastId}`);
+      const broadcast = db.getBroadcast(broadcastId);
+      if (!broadcast) {
+        await ctx.answerCbQuery('Broadcast not found');
+        return;
+      }
+      if (broadcast.status !== 'pending_approval') {
+        await ctx.answerCbQuery(`Already ${broadcast.status}`);
+        return;
+      }
+
+      const testEmails = (process.env.TEST_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+      db.updateBroadcastStatus(broadcastId, 'approved');
+      await ctx.answerCbQuery(`Sending to ${testEmails.length} test email(s)...`);
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      proactiveModule.sendBroadcastTest(broadcastId, testEmails).catch(err => {
+        console.error('[Telegram] Test broadcast send error:', err);
+        sendMessage(`❌ Test broadcast #${broadcastId} failed: ${err.message}`);
+      });
+    } catch (err) {
+      console.error('[Telegram] Test broadcast approve error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
 
   bot.action(/^approve_bc:(\d+)$/, async (ctx) => {
     try {
@@ -366,6 +412,30 @@ async function sendBroadcastApproval(broadcast) {
   db.updateBroadcastTelegramId(broadcast.id, msg.message_id);
 }
 
+// Send a test broadcast draft to Telegram for approval (sends to test emails only)
+async function sendTestBroadcastApproval(broadcast, testEmails) {
+  const text =
+    `🧪 *TEST Broadcast Email Draft*\n\n` +
+    `*Test recipients:* ${testEmails.join(', ')}\n` +
+    `*Subject:* ${broadcast.subject || '(no subject)'}\n\n` +
+    `---\n${broadcast.body}\n---\n\n` +
+    (broadcast.claude_reasoning ? `💡 *Strategy:* ${broadcast.claude_reasoning}\n\n` : '') +
+    `Broadcast #${broadcast.id}`;
+
+  const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Send Test', `approve_test_bc:${broadcast.id}`),
+        Markup.button.callback('❌ Reject', `reject_bc:${broadcast.id}`),
+        Markup.button.callback('✏️ Edit', `edit_bc:${broadcast.id}`),
+      ],
+    ]),
+  });
+
+  db.updateBroadcastTelegramId(broadcast.id, msg.message_id);
+}
+
 // Send a plain notification (used by other modules)
 async function sendMessage(text, parseMode = 'Markdown') {
   if (!bot) return;
@@ -394,6 +464,7 @@ module.exports = {
   getBot,
   sendApprovalRequest,
   sendBroadcastApproval,
+  sendTestBroadcastApproval,
   sendMessage,
   sendAutoApproveNotification,
 };
