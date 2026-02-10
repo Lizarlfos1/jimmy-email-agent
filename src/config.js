@@ -1,8 +1,9 @@
 // ============================================================
-// Product catalog and upsell rules
+// Product catalog, lead magnets, and upsell rules
 // Edit this file to update products, pricing, and upsell logic
 // ============================================================
 
+// --- Paid Products ---
 const products = {
   book: {
     id: 'book',
@@ -24,6 +25,31 @@ const products = {
   },
 };
 
+// --- Free Lead Magnets ---
+const leadMagnets = {
+  trail_braking_pdf: {
+    id: 'trail_braking_pdf',
+    name: 'Advanced Trail Braking Framework (PDF)',
+    url: 'https://jimmygrills.com/wp-content/uploads/2026/01/Advanced_Trail_Braking_Framework.pdf',
+    description: 'Free PDF guide diving deep into trail braking technique',
+    topics: ['trail braking', 'braking', 'corner entry', 'rotation'],
+  },
+  driving_drills_pdf: {
+    id: 'driving_drills_pdf',
+    name: '3 Must-Know Driving Drills (PDF)',
+    url: 'https://jimmygrills.com/wp-content/uploads/2025/11/3-Must-Know-Driving-Exercises-Jimmy-Grills.pdf',
+    description: 'Free PDF with 3 practical driving exercises to improve consistency',
+    topics: ['drills', 'exercises', 'practice', 'consistency', 'fundamentals'],
+  },
+  throttle_audit: {
+    id: 'throttle_audit',
+    name: 'Throttle Control Audit',
+    url: 'https://jimmygrills.com/sp/throttle-audit/',
+    description: 'Free interactive tool — log your laps, identify throttle errors, and get personalised drills based on your most common mistakes',
+    topics: ['throttle', 'throttle control', 'acceleration', 'exit speed', 'traction'],
+  },
+};
+
 // Maps product slugs/WooCommerce names to our product IDs.
 // Add aliases here when WooCommerce product names don't match our slugs.
 const productAliases = {
@@ -40,25 +66,39 @@ const productAliases = {
 // Upsell rules — ordered by priority (first match wins).
 // `hasBought`: products the contact owns (ALL must match).
 // `hasNotBought`: products the contact does NOT own (ALL must match).
-// `suggest`: the product to recommend.
+// `suggest`: product ID to recommend (from products or leadMagnets).
+// `type`: 'product' or 'lead_magnet' — determines which catalog to look up.
 // `angle`: guidance for Claude on how to pitch it.
 const upsellRules = [
+  // Paid product upsells
   {
     hasBought: ['book'],
     hasNotBought: ['university'],
     suggest: 'university',
+    type: 'product',
     angle: 'They\'ve read the theory — Sim Racing University is the next step to put it into practice with structured video modules, the 5-day Fundamentals Bootcamp, and the 30-day Improvement Challenge.',
   },
   {
     hasBought: ['university'],
     hasNotBought: ['book'],
     suggest: 'book',
+    type: 'product',
     angle: 'They\'re already in the University — the Precision Racing book goes deeper on the theory behind the techniques they\'re practicing. Great companion resource.',
   },
+  // Downsell to free lead magnets for non-buyers
+  {
+    hasBought: [],
+    hasNotBought: ['book', 'university'],
+    suggest: 'trail_braking_pdf',
+    type: 'lead_magnet',
+    angle: 'They haven\'t bought anything yet — offer genuine free value first to build trust. The Advanced Trail Braking PDF is a great entry point that demonstrates Jimmy\'s teaching quality.',
+  },
+  // Fallback — suggest the book (cheapest paid product)
   {
     hasBought: [],
     hasNotBought: ['book'],
     suggest: 'book',
+    type: 'product',
     angle: 'The Precision Racing book is the best entry point — $36.99, packed with value, and gives them a solid foundation in sim racing theory.',
   },
 ];
@@ -86,17 +126,20 @@ function getUpsellRecommendation(ownedProductIds) {
     const hasAll = rule.hasBought.every(p => ownedProductIds.includes(p));
     const lacksAll = rule.hasNotBought.every(p => !ownedProductIds.includes(p));
     if (hasAll && lacksAll) {
+      const catalog = rule.type === 'lead_magnet' ? leadMagnets : products;
       return {
-        product: products[rule.suggest],
+        product: catalog[rule.suggest],
+        type: rule.type || 'product',
         angle: rule.angle,
       };
     }
   }
-  return { product: null, angle: nurtureFallback.angle };
+  return { product: null, type: null, angle: nurtureFallback.angle };
 }
 
 module.exports = {
   products,
+  leadMagnets,
   productAliases,
   upsellRules,
   nurtureFallback,

@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('./database');
-const { products, getUpsellRecommendation } = require('./config');
+const { products, leadMagnets, getUpsellRecommendation } = require('./config');
 const { getRandomTips, formatTipsForPrompt } = require('./tipBank');
 
 let client;
@@ -10,7 +10,7 @@ function init() {
   console.log('[EmailBrain] Initialized');
 }
 
-const SYSTEM_PROMPT = `You are ghostwriting emails as Jimmy Grills, a sim racing expert who sells two products: the Precision Racing book (PDF, $36.99) and Sim Racing University (video course, $89.95).
+const SYSTEM_PROMPT = `You are ghostwriting emails as Jimmy Grills, a sim racing expert who sells two products: the Precision Racing book (PDF, $36.99) and Sim Racing University (video course, $89.95). He also offers free lead magnets: an Advanced Trail Braking PDF, a 3 Must-Know Driving Drills PDF, and an interactive Throttle Control Audit tool.
 
 VOICE & TONE:
 - Friendly, knowledgeable, slightly casual but professional
@@ -69,7 +69,7 @@ ${inboundBody}
 
 UPSELL GUIDANCE:
 ${upsell.angle}
-${productInfo ? `Product to suggest: ${productInfo.name} ($${productInfo.price}) — ${productInfo.description}\nProduct link: ${productInfo.url}` : 'No specific product to push right now.'}
+${productInfo ? `${upsell.type === 'lead_magnet' ? 'Free resource' : 'Product'} to suggest: ${productInfo.name}${productInfo.price ? ` ($${productInfo.price})` : ' (FREE)'} — ${productInfo.description}\nLink: ${productInfo.url}` : 'No specific product to push right now.'}
 
 Write a reply email. Reply to their email content first, then naturally work in the upsell if appropriate. If they have a problem or complaint, focus on helping and skip the upsell.`;
 
@@ -100,7 +100,7 @@ ${historyBlock}
 
 UPSELL GUIDANCE:
 ${upsell.angle}
-${productInfo ? `Product to suggest: ${productInfo.name} ($${productInfo.price}) — ${productInfo.description}\nProduct link: ${productInfo.url}` : 'No specific product to push right now.'}
+${productInfo ? `${upsell.type === 'lead_magnet' ? 'Free resource' : 'Product'} to suggest: ${productInfo.name}${productInfo.price ? ` ($${productInfo.price})` : ' (FREE)'} — ${productInfo.description}\nLink: ${productInfo.url}` : 'No specific product to push right now.'}
 
 This is a PROACTIVE outreach email — the customer hasn't emailed us. Write a personalized opener that references something specific to them (their purchase history, a racing topic relevant to their level). Don't open with "just checking in" or generic greetings. Make it feel like Jimmy genuinely thought of them for a reason.`;
 
@@ -113,11 +113,19 @@ async function generateBroadcast() {
   const tips = getRandomTips(5);
   const tipContext = formatTipsForPrompt(tips);
 
+  // Build the CTA options list — rotate between products and lead magnets
+  const ctaOptions = [
+    `PAID: Precision Racing (PDF) — $36.99 — ${products.book.url}`,
+    `PAID: Sim Racing University — $89.95 — ${products.university.url}`,
+    `FREE: ${leadMagnets.trail_braking_pdf.name} — ${leadMagnets.trail_braking_pdf.url}`,
+    `FREE: ${leadMagnets.driving_drills_pdf.name} — ${leadMagnets.driving_drills_pdf.url}`,
+    `FREE: ${leadMagnets.throttle_audit.name} — ${leadMagnets.throttle_audit.description} — ${leadMagnets.throttle_audit.url}`,
+  ].join('\n- ');
+
   const userPrompt = `Write a BROADCAST email that goes to Jimmy's entire mailing list (mix of customers and non-customers).
 
-PRODUCTS (include the relevant link in the CTA):
-- Precision Racing (PDF) — $36.99 — https://jimmygrills.com/sp/precision-racing-pdf/
-- Sim Racing University — $89.95 — https://jimmygrills.com/sp/sim-racing-university/
+CTA OPTIONS (pick the ONE that best fits the topic of this email):
+- ${ctaOptions}
 
 REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and write about it in Jimmy's voice):
 ${tipContext}
@@ -126,11 +134,13 @@ STRUCTURE:
 1. Pick ONE topic from the reference material above. Use the insight and actionable tip as your foundation, but rewrite it in Jimmy's casual, conversational email voice. Don't copy it verbatim — adapt and expand on it naturally.
 2. End the main content with an OPEN LOOP QUESTION — something that invites them to reply. Make it related to the topic. Examples: "What track are you struggling with most right now?", "Have you ever noticed this happening in your driving?", "What's the one thing holding you back from being consistently fast?"
 3. Sign off as Jimmy.
-4. AFTER the sign-off, add a short CTA on its own line like:
-   "Want to get faster? Check out Sim Racing University: https://jimmygrills.com/sp/sim-racing-university/"
-   or
-   "Want the theory behind the technique? Grab Precision Racing: https://jimmygrills.com/sp/precision-racing-pdf/"
-   Pick whichever product fits the topic of this email best.
+4. AFTER the sign-off, add a short CTA on its own line. Pick whichever option from the CTA OPTIONS above fits the email topic best. Examples:
+   "Want to get faster? Check out Sim Racing University: ${products.university.url}"
+   "Want the theory behind the technique? Grab Precision Racing: ${products.book.url}"
+   "Want to nail your trail braking? Grab my free guide: ${leadMagnets.trail_braking_pdf.url}"
+   "Try these 3 drills in your next session: ${leadMagnets.driving_drills_pdf.url}"
+   "Find out what's costing you time on corner exit — try the free Throttle Audit: ${leadMagnets.throttle_audit.url}"
+   Alternate between free and paid CTAs — don't always push a product. Match the CTA to the topic.
 
 IMPORTANT:
 - This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
