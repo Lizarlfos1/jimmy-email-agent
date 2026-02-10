@@ -519,6 +519,43 @@ function getAnalytics({ days = 30 } = {}) {
   };
 }
 
+// --- Self-Learning Queries ---
+
+function getBroadcastsWithPerformance() {
+  return db.prepare(`
+    SELECT
+      b.id,
+      b.subject,
+      b.body,
+      b.created_at,
+      b.total_contacts,
+      b.sent_count,
+      COUNT(DISTINCT et.id) as tracked_count,
+      COUNT(DISTINCT CASE WHEN et.open_count > 0 THEN et.id END) as open_count,
+      COUNT(DISTINCT CASE WHEN tc.id IS NOT NULL THEN et.id END) as click_count,
+      COUNT(DISTINCT pa.id) as purchase_count,
+      COALESCE(SUM(DISTINCT pa.order_total), 0) as purchase_revenue
+    FROM broadcasts b
+    LEFT JOIN email_tracking et ON et.broadcast_id = b.id
+    LEFT JOIN tracking_clicks tc ON tc.tracking_id = et.id
+    LEFT JOIN purchase_attributions pa ON pa.tracking_id = et.id
+    WHERE b.status = 'sent'
+    GROUP BY b.id
+    ORDER BY b.created_at DESC
+  `).all();
+}
+
+function getClickedUrlsForBroadcast(broadcastId) {
+  return db.prepare(`
+    SELECT tc.original_url, COUNT(*) as clicks
+    FROM tracking_clicks tc
+    INNER JOIN email_tracking et ON et.id = tc.tracking_id
+    WHERE et.broadcast_id = ?
+    GROUP BY tc.original_url
+    ORDER BY clicks DESC
+  `).all(broadcastId);
+}
+
 function getDb() {
   return db;
 }
@@ -564,4 +601,6 @@ module.exports = {
   createPurchaseAttribution,
   getRecentTrackingForContact,
   getAnalytics,
+  getBroadcastsWithPerformance,
+  getClickedUrlsForBroadcast,
 };

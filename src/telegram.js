@@ -36,6 +36,25 @@ function init() {
 }
 
 function registerCommands() {
+  bot.command('help', async (ctx) => {
+    const msg =
+      `*Available Commands*\n\n` +
+      `/status — Agent stats (contacts, pending, sent today)\n` +
+      `/auto on|off — Toggle auto-approve for outbound emails\n` +
+      `/broadcast — Generate a broadcast email for all contacts\n` +
+      `/testbroadcast — Generate a broadcast sent only to test emails\n` +
+      `/outreach — Run proactive outreach to all eligible contacts\n` +
+      `/sync — Sync contacts from WooCommerce\n` +
+      `/pending — Resend all pending approval requests\n` +
+      `/analytics [days] — Open/click/purchase stats (default 30 days)\n` +
+      `/learn — Run self-learning analysis on past email performance\n` +
+      `/insights — View current learned email writing insights\n` +
+      `/blacklist email — Block a contact from receiving emails\n` +
+      `/unblacklist email — Unblock a contact`;
+
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+  });
+
   bot.command('status', async (ctx) => {
     const stats = db.getStats();
     await ctx.reply(
@@ -201,6 +220,43 @@ function registerCommands() {
       topLinkLines;
 
     await ctx.reply(msg, { parse_mode: 'Markdown' });
+  });
+
+  bot.command('learn', async (ctx) => {
+    await ctx.reply('📊 Running self-learning analysis...');
+    try {
+      const selfLearning = require('./selfLearning');
+      const result = await selfLearning.runAnalysis();
+      if (!result) {
+        // runAnalysis already sent its own message about insufficient data
+      }
+    } catch (err) {
+      console.error('[Telegram] Self-learning error:', err);
+      await ctx.reply(`❌ Self-learning analysis failed: ${err.message}`);
+    }
+  });
+
+  bot.command('insights', async (ctx) => {
+    const insights = db.getSetting('self_learning_insights');
+    const meta = db.getSetting('self_learning_meta');
+
+    if (!insights) {
+      await ctx.reply('No self-learning insights stored yet. Run /learn to generate them.');
+      return;
+    }
+
+    let metaInfo = '';
+    if (meta) {
+      const parsed = JSON.parse(meta);
+      metaInfo = `Last run: ${parsed.last_run}\n` +
+        `Confidence: ${parsed.confidence}\n` +
+        `Broadcasts analyzed: ${parsed.broadcasts_analyzed}\n\n`;
+    }
+
+    await ctx.reply(
+      `📊 *Current Email Insights*\n\n${metaInfo}${escapeMd(insights)}`,
+      { parse_mode: 'Markdown' }
+    );
   });
 
   bot.command('pending', async (ctx) => {

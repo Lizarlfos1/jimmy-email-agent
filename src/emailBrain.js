@@ -104,7 +104,13 @@ ${productInfo ? `${upsell.type === 'lead_magnet' ? 'Free resource' : 'Product'} 
 
 This is a PROACTIVE outreach email — the customer hasn't emailed us. Write a personalized opener that references something specific to them (their purchase history, a racing topic relevant to their level). Don't open with "just checking in" or generic greetings. Make it feel like Jimmy genuinely thought of them for a reason.`;
 
-  return callClaude(userPrompt);
+  // Inject self-learning insights if available
+  const insights = db.getSetting('self_learning_insights');
+  const fullPrompt = insights
+    ? userPrompt + `\n\nWRITING INSIGHTS (learned from email performance data — apply where relevant, but prioritize personalization):\n${insights}`
+    : userPrompt;
+
+  return callClaude(fullPrompt);
 }
 
 // Generate a broadcast email (same email sent to all contacts)
@@ -148,7 +154,13 @@ IMPORTANT:
 - The tip should feel like genuine value from Jimmy's actual teaching, not generic advice.
 - The open loop question should feel natural, not forced.`;
 
-  return callClaude(userPrompt);
+  // Inject self-learning insights if available
+  const insights = db.getSetting('self_learning_insights');
+  const fullPrompt = insights
+    ? userPrompt + `\n\nPERFORMANCE INSIGHTS (learned from past email data — follow these patterns):\n${insights}`
+    : userPrompt;
+
+  return callClaude(fullPrompt);
 }
 
 async function callClaude(userPrompt) {

@@ -14,6 +14,7 @@ const proactive = require('./proactive');
 const { resolveProductId } = require('./config');
 const { parseSesNotification, validateSnsMessage } = require('./sesInbound');
 const tracking = require('./tracking');
+const selfLearning = require('./selfLearning');
 
 const app = express();
 // SNS sends with text/plain content-type, so we need to parse that as JSON too
@@ -411,6 +412,7 @@ async function start() {
   db.init();
   emailBrain.init();
   emailSender.init();
+  selfLearning.init();
   telegram.init();
   proactive.init();
 

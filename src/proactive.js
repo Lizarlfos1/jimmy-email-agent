@@ -6,10 +6,12 @@ const telegram = require('./telegram');
 const wordpress = require('./wordpress');
 const { getUpsellRecommendation } = require('./config');
 const tracking = require('./tracking');
+const selfLearning = require('./selfLearning');
 
 let syncJob;
 let outreachJob;
 let broadcastJob;
+let learningJob;
 
 function init() {
   // Sync contacts from CRM daily at 2am
@@ -37,7 +39,28 @@ function init() {
     }
   }, { timezone: 'Australia/Sydney' });
 
-  console.log('[Cron] Scheduled: sync at 2am AEST, broadcasts Mon/Thu/Sat at 9am AEST');
+  // Self-learning analysis: check every Sunday at 3am, run if 14+ days since last
+  learningJob = cron.schedule('0 3 * * 0', async () => {
+    const meta = db.getSetting('self_learning_meta');
+    if (meta) {
+      const { last_run } = JSON.parse(meta);
+      const daysSince = (Date.now() - new Date(last_run).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince < 13) {
+        console.log(`[Cron] Self-learning: ${daysSince.toFixed(1)} days since last run, skipping.`);
+        return;
+      }
+    }
+
+    console.log('[Cron] Running self-learning analysis...');
+    try {
+      await selfLearning.runAnalysis();
+    } catch (err) {
+      console.error('[Cron] Self-learning analysis failed:', err);
+      await telegram.sendMessage(`❌ Self-learning analysis failed: ${err.message}`);
+    }
+  }, { timezone: 'Australia/Sydney' });
+
+  console.log('[Cron] Scheduled: sync 2am, broadcasts Mon/Thu/Sat 9am, self-learning biweekly Sun 3am');
 }
 
 async function syncContacts() {
