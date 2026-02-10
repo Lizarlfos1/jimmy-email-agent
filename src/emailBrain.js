@@ -9,7 +9,7 @@ function init() {
   console.log('[EmailBrain] Initialized');
 }
 
-const SYSTEM_PROMPT = `You are ghostwriting emails as Jimmy Grills, a sim racing expert who runs an educational business (courses, books, gloves).
+const SYSTEM_PROMPT = `You are ghostwriting emails as Jimmy Grills, a sim racing expert who sells two products: the Precision Racing book (PDF, $36.99) and Sim Racing University (video course, $89.95).
 
 VOICE & TONE:
 - Friendly, knowledgeable, slightly casual but professional
@@ -24,6 +24,7 @@ FORMAT:
 - Short paragraphs (1-3 sentences each)
 - No bullet points or numbered lists in emails — keep it conversational
 - Include a clear but soft call to action when relevant
+- When mentioning a product, include its link naturally (e.g. "you can check it out here: <url>")
 
 IMPORTANT RULES:
 - Never fabricate details about the customer — only reference info provided in the context
@@ -31,6 +32,7 @@ IMPORTANT RULES:
 - If replying to an inbound email, address their actual question/topic FIRST, then weave in the upsell naturally
 - If the customer seems frustrated or has a complaint, focus entirely on helping — no upselling
 - For proactive outreach, open with something relevant to them (their purchase, a racing topic) — never "just checking in"
+- Only include a product link when you're actually suggesting/mentioning that product — don't force links into every email
 
 You must respond with valid JSON only. No markdown, no code fences. The JSON schema:
 {
@@ -66,7 +68,7 @@ ${inboundBody}
 
 UPSELL GUIDANCE:
 ${upsell.angle}
-${productInfo ? `Product to suggest: ${productInfo.name} — ${productInfo.description}` : 'No specific product to push right now.'}
+${productInfo ? `Product to suggest: ${productInfo.name} ($${productInfo.price}) — ${productInfo.description}\nProduct link: ${productInfo.url}` : 'No specific product to push right now.'}
 
 Write a reply email. Reply to their email content first, then naturally work in the upsell if appropriate. If they have a problem or complaint, focus on helping and skip the upsell.`;
 
@@ -97,7 +99,7 @@ ${historyBlock}
 
 UPSELL GUIDANCE:
 ${upsell.angle}
-${productInfo ? `Product to suggest: ${productInfo.name} — ${productInfo.description}` : 'No specific product to push right now.'}
+${productInfo ? `Product to suggest: ${productInfo.name} ($${productInfo.price}) — ${productInfo.description}\nProduct link: ${productInfo.url}` : 'No specific product to push right now.'}
 
 This is a PROACTIVE outreach email — the customer hasn't emailed us. Write a personalized opener that references something specific to them (their purchase history, a racing topic relevant to their level). Don't open with "just checking in" or generic greetings. Make it feel like Jimmy genuinely thought of them for a reason.`;
 

@@ -6,74 +6,35 @@
 const products = {
   book: {
     id: 'book',
-    name: 'Precision Racing (2nd Edition)',
-    slug: 'precision-racing-book',
+    name: 'Precision Racing (PDF)',
+    slug: 'precision-racing-pdf',
     type: 'book',
-    description: 'Comprehensive sim racing theory covering fundamentals through advanced concepts',
-    price: null, // fill in actual price
-    url: null,   // fill in product URL
+    price: 36.99,
+    url: 'https://jimmygrills.com/sp/precision-racing-pdf/',
+    description: 'Comprehensive sim racing theory book covering fundamentals through advanced concepts (PDF)',
   },
-  course_fundamentals: {
-    id: 'course_fundamentals',
-    name: 'Sim Racing Fundamentals Course',
-    slug: 'fundamentals-course',
+  university: {
+    id: 'university',
+    name: 'Sim Racing University',
+    slug: 'sim-racing-university',
     type: 'course',
-    description: 'Online course covering the essentials of sim racing technique',
-    price: null,
-    url: null,
+    price: 89.95,
+    url: 'https://jimmygrills.com/sp/sim-racing-university/',
+    description: 'Complete video course with all 4 core modules, lifetime platform access, Fundamentals Bootcamp (5-day program), Improvement Challenge (30-day program), Car Handling Exercise Library, and weekly Time Trial Challenges',
   },
-  course_advanced: {
-    id: 'course_advanced',
-    name: 'Advanced Sim Racing Course',
-    slug: 'advanced-course',
-    type: 'course',
-    description: 'Advanced module building on fundamentals — car setup, racecraft, consistency',
-    price: null,
-    url: null,
-  },
-  gloves: {
-    id: 'gloves',
-    name: 'GLZ Performance Racing Gloves',
-    slug: 'glz-gloves',
-    type: 'gear',
-    description: 'Premium sim racing gloves for better wheel feel and grip',
-    price: null,
-    url: null,
-  },
-  // Future products — uncomment when ready
-  // coaching: {
-  //   id: 'coaching',
-  //   name: '1-on-1 Coaching Session',
-  //   slug: 'coaching-session',
-  //   type: 'coaching',
-  //   description: 'Personal coaching session with Jimmy',
-  //   price: null,
-  //   url: null,
-  // },
-  // masterclass: {
-  //   id: 'masterclass',
-  //   name: 'Masterclass',
-  //   slug: 'masterclass',
-  //   type: 'course',
-  //   description: 'Deep-dive masterclass on specific racing topics',
-  //   price: null,
-  //   url: null,
-  // },
 };
 
 // Maps product slugs/WooCommerce names to our product IDs.
 // Add aliases here when WooCommerce product names don't match our slugs.
 const productAliases = {
   'precision-racing': 'book',
+  'precision-racing-pdf': 'book',
   'precision-racing-book': 'book',
   'precision-racing-2nd-edition': 'book',
-  'fundamentals-course': 'course_fundamentals',
-  'sim-racing-fundamentals': 'course_fundamentals',
-  'advanced-course': 'course_advanced',
-  'sim-racing-advanced': 'course_advanced',
-  'glz-gloves': 'gloves',
-  'glz-performance-gloves': 'gloves',
-  'racing-gloves': 'gloves',
+  'precision-racing--pdf-': 'book',
+  'sim-racing-university': 'university',
+  'sim-racing-uni': 'university',
+  'university': 'university',
 };
 
 // Upsell rules — ordered by priority (first match wins).
@@ -84,45 +45,27 @@ const productAliases = {
 const upsellRules = [
   {
     hasBought: ['book'],
-    hasNotBought: ['course_fundamentals'],
-    suggest: 'course_fundamentals',
-    angle: 'They liked the theory — now show them how to apply it with structured practice in the fundamentals course.',
+    hasNotBought: ['university'],
+    suggest: 'university',
+    angle: 'They\'ve read the theory — Sim Racing University is the next step to put it into practice with structured video modules, the 5-day Fundamentals Bootcamp, and the 30-day Improvement Challenge.',
   },
   {
-    hasBought: ['course_fundamentals'],
-    hasNotBought: ['course_advanced'],
-    suggest: 'course_advanced',
-    angle: 'They\'ve nailed the basics — the advanced course will take them to the next level with setup work and racecraft.',
-  },
-  {
-    hasBought: ['course_fundamentals'],
+    hasBought: ['university'],
     hasNotBought: ['book'],
     suggest: 'book',
-    angle: 'Complement their practical skills with the deeper theory in the book — covers concepts the course touches on but doesn\'t go deep into.',
-  },
-  {
-    hasBought: ['course_advanced'],
-    hasNotBought: ['gloves'],
-    suggest: 'gloves',
-    angle: 'They\'re serious about their racing — quality gloves improve wheel feel and consistency. Natural next step for someone at their level.',
-  },
-  {
-    hasBought: ['course_fundamentals', 'course_advanced'],
-    hasNotBought: ['gloves'],
-    suggest: 'gloves',
-    angle: 'They\'ve invested in their skills — the gloves are the gear upgrade that matches their commitment.',
+    angle: 'They\'re already in the University — the Precision Racing book goes deeper on the theory behind the techniques they\'re practicing. Great companion resource.',
   },
   {
     hasBought: [],
     hasNotBought: ['book'],
     suggest: 'book',
-    angle: 'The book is the best entry point — low commitment, packed with value, and gives them a taste of what Jimmy teaches.',
+    angle: 'The Precision Racing book is the best entry point — $36.99, packed with value, and gives them a solid foundation in sim racing theory.',
   },
 ];
 
 // Nurture angle for contacts who already own everything
 const nurtureFallback = {
-  angle: 'They own everything — nurture the relationship. Ask how their racing is going, if they have questions, and hint that new stuff is coming.',
+  angle: 'They own both products — nurture the relationship. Ask how their racing is going, how they\'re finding the University content, and if they have any questions.',
 };
 
 // Resolve a WooCommerce product name/slug to our internal product ID
