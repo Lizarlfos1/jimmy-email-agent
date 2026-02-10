@@ -216,10 +216,18 @@ async function sendBroadcastTest(broadcastId, testEmails) {
 
   for (const email of testEmails) {
     try {
+      // Use tracking so test broadcasts can verify the full flow
+      const contact = db.getContactByEmail(email) || { id: 0 };
+      const tracked = tracking.prepareTrackedEmail({
+        contactId: contact.id,
+        broadcastId: broadcastId,
+        body: broadcast.body,
+      });
       await emailSender.send({
         to: email,
         subject: broadcast.subject,
-        body: broadcast.body,
+        body: tracked.textBody,
+        htmlBody: tracked.htmlBody,
       });
       sent++;
     } catch (err) {
