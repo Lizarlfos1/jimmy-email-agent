@@ -1,6 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('./database');
 const { products, getUpsellRecommendation } = require('./config');
+const { getRandomTips, formatTipsForPrompt } = require('./tipBank');
 
 let client;
 
@@ -106,6 +107,40 @@ This is a PROACTIVE outreach email — the customer hasn't emailed us. Write a p
   return callClaude(userPrompt);
 }
 
+// Generate a broadcast email (same email sent to all contacts)
+async function generateBroadcast() {
+  // Pull 5 random tips from the course content for variety
+  const tips = getRandomTips(5);
+  const tipContext = formatTipsForPrompt(tips);
+
+  const userPrompt = `Write a BROADCAST email that goes to Jimmy's entire mailing list (mix of customers and non-customers).
+
+PRODUCTS (include the relevant link in the CTA):
+- Precision Racing (PDF) — $36.99 — https://jimmygrills.com/sp/precision-racing-pdf/
+- Sim Racing University — $89.95 — https://jimmygrills.com/sp/sim-racing-university/
+
+REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and write about it in Jimmy's voice):
+${tipContext}
+
+STRUCTURE:
+1. Pick ONE topic from the reference material above. Use the insight and actionable tip as your foundation, but rewrite it in Jimmy's casual, conversational email voice. Don't copy it verbatim — adapt and expand on it naturally.
+2. End the main content with an OPEN LOOP QUESTION — something that invites them to reply. Make it related to the topic. Examples: "What track are you struggling with most right now?", "Have you ever noticed this happening in your driving?", "What's the one thing holding you back from being consistently fast?"
+3. Sign off as Jimmy.
+4. AFTER the sign-off, add a short CTA on its own line like:
+   "Want to get faster? Check out Sim Racing University: https://jimmygrills.com/sp/sim-racing-university/"
+   or
+   "Want the theory behind the technique? Grab Precision Racing: https://jimmygrills.com/sp/precision-racing-pdf/"
+   Pick whichever product fits the topic of this email best.
+
+IMPORTANT:
+- This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
+- Keep it 100-150 words (excluding the CTA line).
+- The tip should feel like genuine value from Jimmy's actual teaching, not generic advice.
+- The open loop question should feel natural, not forced.`;
+
+  return callClaude(userPrompt);
+}
+
 async function callClaude(userPrompt) {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -141,4 +176,4 @@ async function callClaude(userPrompt) {
   };
 }
 
-module.exports = { init, generateReply, generateOutreach };
+module.exports = { init, generateReply, generateOutreach, generateBroadcast };

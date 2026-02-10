@@ -56,6 +56,21 @@ function init() {
       FOREIGN KEY (email_thread_id) REFERENCES email_threads(id)
     );
 
+    CREATE TABLE IF NOT EXISTS broadcasts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject TEXT,
+      body TEXT,
+      status TEXT NOT NULL DEFAULT 'pending_approval'
+        CHECK(status IN ('pending_approval', 'approved', 'sending', 'sent', 'rejected', 'failed')),
+      telegram_message_id TEXT,
+      claude_reasoning TEXT,
+      total_contacts INTEGER DEFAULT 0,
+      sent_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -284,6 +299,49 @@ function logUpsell({ contactId, productSuggested, emailThreadId, outcome }) {
   ).run(contactId, productSuggested, emailThreadId || null, outcome || 'pending');
 }
 
+// --- Broadcasts ---
+
+function createBroadcast({ subject, body, claudeReasoning, totalContacts }) {
+  const result = db.prepare(
+    'INSERT INTO broadcasts (subject, body, claude_reasoning, total_contacts) VALUES (?, ?, ?, ?)'
+  ).run(subject, body, claudeReasoning || null, totalContacts || 0);
+  return getBroadcast(result.lastInsertRowid);
+}
+
+function getBroadcast(id) {
+  return db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(id);
+}
+
+function updateBroadcastStatus(id, status) {
+  db.prepare(
+    "UPDATE broadcasts SET status = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(status, id);
+}
+
+function updateBroadcastTelegramId(id, telegramMessageId) {
+  db.prepare(
+    "UPDATE broadcasts SET telegram_message_id = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(String(telegramMessageId), id);
+}
+
+function updateBroadcastBody(id, body) {
+  db.prepare(
+    "UPDATE broadcasts SET body = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(body, id);
+}
+
+function updateBroadcastProgress(id, sentCount, failedCount) {
+  db.prepare(
+    "UPDATE broadcasts SET sent_count = ?, failed_count = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(sentCount, failedCount, id);
+}
+
+function getPendingBroadcast() {
+  return db.prepare(
+    "SELECT * FROM broadcasts WHERE status = 'pending_approval' ORDER BY created_at DESC LIMIT 1"
+  ).get();
+}
+
 // --- Stats ---
 
 function getStats() {
@@ -329,5 +387,12 @@ module.exports = {
   updateContactLastEmailReceived,
   canEmailContact,
   logUpsell,
+  createBroadcast,
+  getBroadcast,
+  updateBroadcastStatus,
+  updateBroadcastTelegramId,
+  updateBroadcastBody,
+  updateBroadcastProgress,
+  getPendingBroadcast,
   getStats,
 };

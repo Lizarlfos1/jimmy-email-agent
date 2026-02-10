@@ -111,6 +111,17 @@ function registerCommands() {
     }
   });
 
+  bot.command('broadcast', async (ctx) => {
+    await ctx.reply('🔄 Generating broadcast email...');
+    try {
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      await proactiveModule.generateBroadcast();
+    } catch (err) {
+      console.error('[Telegram] Broadcast error:', err);
+      await ctx.reply(`❌ Broadcast generation failed: ${err.message}`);
+    }
+  });
+
   bot.command('pending', async (ctx) => {
     const pending = db.getPendingApprovals();
     if (pending.length === 0) {
@@ -187,6 +198,87 @@ function registerCallbacks() {
     }
   });
 
+  // --- Broadcast callbacks ---
+
+  bot.action(/^approve_bc:(\d+)$/, async (ctx) => {
+    try {
+      const broadcastId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Approve broadcast #${broadcastId}`);
+      const broadcast = db.getBroadcast(broadcastId);
+      if (!broadcast) {
+        await ctx.answerCbQuery('Broadcast not found');
+        return;
+      }
+      if (broadcast.status !== 'pending_approval') {
+        await ctx.answerCbQuery(`Already ${broadcast.status}`);
+        return;
+      }
+
+      db.updateBroadcastStatus(broadcastId, 'approved');
+      await ctx.answerCbQuery('Approved! Sending to all contacts...');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+
+      // Send in background — don't block the callback
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      proactiveModule.sendBroadcastToAll(broadcastId).catch(err => {
+        console.error('[Telegram] Broadcast send error:', err);
+        sendMessage(`❌ Broadcast #${broadcastId} failed: ${err.message}`);
+      });
+    } catch (err) {
+      console.error('[Telegram] Broadcast approve error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
+  bot.action(/^reject_bc:(\d+)$/, async (ctx) => {
+    try {
+      const broadcastId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Reject broadcast #${broadcastId}`);
+      const broadcast = db.getBroadcast(broadcastId);
+      if (!broadcast) {
+        await ctx.answerCbQuery('Broadcast not found');
+        return;
+      }
+      db.updateBroadcastStatus(broadcastId, 'rejected');
+      await ctx.answerCbQuery('Broadcast rejected');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      await sendMessage(`❌ Broadcast #${broadcastId} rejected.`);
+    } catch (err) {
+      console.error('[Telegram] Broadcast reject error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
+  bot.action(/^edit_bc:(\d+)$/, async (ctx) => {
+    try {
+      const broadcastId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Edit broadcast #${broadcastId}`);
+      await ctx.answerCbQuery('Send me the edited email text');
+      await sendMessage(
+        `✏️ Reply with the edited email body for broadcast #${broadcastId}.\n` +
+        `The subject line won't change. Just send the new body text.`
+      );
+
+      bot.on('text', async function editBcHandler(editCtx) {
+        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
+        bot.off('text', editBcHandler);
+
+        const newBody = editCtx.message.text;
+        db.updateBroadcastBody(broadcastId, newBody);
+        db.updateBroadcastStatus(broadcastId, 'pending_approval');
+
+        const broadcast = db.getBroadcast(broadcastId);
+        await sendMessage('✅ Broadcast updated. Resending for approval...');
+        await sendBroadcastApproval(broadcast);
+      });
+    } catch (err) {
+      console.error('[Telegram] Broadcast edit error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
+  // --- Per-contact email callbacks ---
+
   bot.action(/^edit:(\d+)$/, async (ctx) => {
     try {
       const threadId = parseInt(ctx.match[1]);
@@ -249,6 +341,31 @@ async function sendApprovalRequest(contact, thread) {
   db.updateThreadTelegramId(thread.id, msg.message_id);
 }
 
+// Send a broadcast draft to Telegram for approval (single message for all contacts)
+async function sendBroadcastApproval(broadcast) {
+  const contacts = db.getNonBlacklistedContacts();
+  const text =
+    `📢 *Broadcast Email Draft*\n\n` +
+    `*Recipients:* ${contacts.length} contacts\n` +
+    `*Subject:* ${broadcast.subject || '(no subject)'}\n\n` +
+    `---\n${broadcast.body}\n---\n\n` +
+    (broadcast.claude_reasoning ? `💡 *Strategy:* ${broadcast.claude_reasoning}\n\n` : '') +
+    `Broadcast #${broadcast.id}`;
+
+  const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Send to All', `approve_bc:${broadcast.id}`),
+        Markup.button.callback('❌ Reject', `reject_bc:${broadcast.id}`),
+        Markup.button.callback('✏️ Edit', `edit_bc:${broadcast.id}`),
+      ],
+    ]),
+  });
+
+  db.updateBroadcastTelegramId(broadcast.id, msg.message_id);
+}
+
 // Send a plain notification (used by other modules)
 async function sendMessage(text, parseMode = 'Markdown') {
   if (!bot) return;
@@ -276,6 +393,7 @@ module.exports = {
   init,
   getBot,
   sendApprovalRequest,
+  sendBroadcastApproval,
   sendMessage,
   sendAutoApproveNotification,
 };

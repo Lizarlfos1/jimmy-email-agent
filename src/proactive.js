@@ -8,6 +8,7 @@ const { getUpsellRecommendation } = require('./config');
 
 let syncJob;
 let outreachJob;
+let broadcastJob;
 
 function init() {
   // Sync contacts from CRM daily at 2am
@@ -24,7 +25,18 @@ function init() {
 
   // Outreach cron disabled — run manually via /outreach in Telegram when ready
 
-  console.log('[Cron] Scheduled: sync at 2am AEST');
+  // Broadcast emails: Mon, Thu, Sat at 9am AEST
+  broadcastJob = cron.schedule('0 9 * * 1,4,6', async () => {
+    console.log('[Cron] Running broadcast generation...');
+    try {
+      await generateBroadcast();
+    } catch (err) {
+      console.error('[Cron] Broadcast generation failed:', err);
+      await telegram.sendMessage(`❌ Broadcast generation failed: ${err.message}`);
+    }
+  }, { timezone: 'Australia/Sydney' });
+
+  console.log('[Cron] Scheduled: sync at 2am AEST, broadcasts Mon/Thu/Sat at 9am AEST');
 }
 
 async function syncContacts() {
@@ -101,4 +113,76 @@ async function runOutreach() {
   return draftsGenerated;
 }
 
-module.exports = { init, syncContacts, runOutreach };
+async function generateBroadcast() {
+  const contacts = db.getNonBlacklistedContacts();
+
+  let draft;
+  try {
+    draft = await emailBrain.generateBroadcast();
+  } catch (err) {
+    console.error('[Broadcast] Failed to generate:', err.message);
+    throw err;
+  }
+
+  const broadcast = db.createBroadcast({
+    subject: draft.subject,
+    body: draft.body,
+    claudeReasoning: draft.reasoning,
+    totalContacts: contacts.length,
+  });
+
+  console.log(`[Broadcast] Generated #${broadcast.id} for ${contacts.length} contacts`);
+  await telegram.sendBroadcastApproval(broadcast);
+  return broadcast;
+}
+
+async function sendBroadcastToAll(broadcastId) {
+  const broadcast = db.getBroadcast(broadcastId);
+  if (!broadcast) throw new Error('Broadcast not found');
+
+  db.updateBroadcastStatus(broadcastId, 'sending');
+  const contacts = db.getNonBlacklistedContacts();
+
+  let sent = 0;
+  let failed = 0;
+
+  await telegram.sendMessage(`📤 Sending broadcast #${broadcastId} to ${contacts.length} contacts...`);
+
+  for (let i = 0; i < contacts.length; i++) {
+    const contact = contacts[i];
+    try {
+      await emailSender.send({
+        to: contact.email,
+        subject: broadcast.subject,
+        body: broadcast.body,
+      });
+      sent++;
+    } catch (err) {
+      console.error(`[Broadcast] Failed to send to ${contact.email}:`, err.message);
+      failed++;
+    }
+
+    // Small delay to stay within SES rate limits
+    await new Promise(r => setTimeout(r, 50));
+
+    // Progress update every 500 emails
+    if ((i + 1) % 500 === 0) {
+      db.updateBroadcastProgress(broadcastId, sent, failed);
+      await telegram.sendMessage(
+        `📊 Broadcast #${broadcastId} progress: ${sent} sent, ${failed} failed, ${contacts.length - i - 1} remaining...`
+      );
+    }
+  }
+
+  db.updateBroadcastProgress(broadcastId, sent, failed);
+  db.updateBroadcastStatus(broadcastId, failed === contacts.length ? 'failed' : 'sent');
+
+  await telegram.sendMessage(
+    `✅ Broadcast #${broadcastId} complete!\n` +
+    `Sent: ${sent} | Failed: ${failed} | Total: ${contacts.length}`
+  );
+
+  return { sent, failed, total: contacts.length };
+}
+
+module.exports = { init, syncContacts, runOutreach, generateBroadcast, sendBroadcastToAll };
