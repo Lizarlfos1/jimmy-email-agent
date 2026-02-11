@@ -32,6 +32,21 @@ function verifyWebhook(req, res, next) {
   next();
 }
 
+// --- Skip automated/bounce emails ---
+function isAutomatedEmail(fromEmail, subject) {
+  const lower = fromEmail.toLowerCase();
+  if (lower.startsWith('mailer-daemon@')) return true;
+  if (lower.startsWith('postmaster@')) return true;
+  if (lower.startsWith('noreply@') || lower.startsWith('no-reply@')) return true;
+  if (lower.includes('amazonses.com')) return true;
+  const subLower = (subject || '').toLowerCase();
+  if (subLower.includes('delivery status notification')) return true;
+  if (subLower.includes('undeliverable') || subLower.includes('undelivered')) return true;
+  if (subLower.includes('mail delivery failed')) return true;
+  if (subLower.includes('failure notice')) return true;
+  return false;
+}
+
 // --- Cold outreach reply detection ---
 function handleColdOutreachReply(contact) {
   const cocRecord = db.getColdOutreachByContactEmail(contact.email);
@@ -61,6 +76,12 @@ app.post('/webhook/inbound-email', verifyWebhook, async (req, res) => {
     }
 
     console.log(`[Webhook] Inbound email from ${from_email}: ${subject}`);
+
+    // Skip automated bounce/delivery notifications
+    if (isAutomatedEmail(from_email, subject)) {
+      console.log(`[Webhook] Skipping automated email from ${from_email}`);
+      return res.json({ status: 'skipped', reason: 'automated' });
+    }
 
     // Upsert the contact
     const contact = db.upsertContact({
@@ -284,6 +305,12 @@ app.post('/webhook/ses-inbound', async (req, res) => {
       if (fromEmail === (process.env.SES_FROM_EMAIL || '').toLowerCase()) {
         console.log('[SES Inbound] Skipping email from self');
         return res.json({ status: 'skipped', reason: 'self' });
+      }
+
+      // Skip automated bounce/delivery notifications
+      if (isAutomatedEmail(email.from_email, email.subject)) {
+        console.log(`[SES Inbound] Skipping automated email from ${email.from_email}`);
+        return res.json({ status: 'skipped', reason: 'automated' });
       }
 
       // Upsert contact
