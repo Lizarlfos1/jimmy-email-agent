@@ -163,6 +163,81 @@ IMPORTANT:
   return callClaude(fullPrompt);
 }
 
+// Generate cold outreach email for non-purchasers (batch — same email for all)
+async function generateColdOutreach() {
+  const userPrompt = `Write a COLD OUTREACH email for Jimmy's mailing list subscribers who have NOT purchased anything yet.
+
+GOAL: Offer genuine free value to start a relationship. The primary CTA is the Advanced Trail Braking Framework (free PDF).
+
+FREE RESOURCE TO OFFER:
+- Advanced Trail Braking Framework (PDF) — FREE
+- Link: ${leadMagnets.trail_braking_pdf.url}
+- What it covers: ${leadMagnets.trail_braking_pdf.description}
+
+DISCOUNT LANGUAGE RULES (use ONLY if you mention these products — do NOT lead with discounts):
+- Precision Racing book: "60% off" — ${products.book.url}
+- Sim Racing University: "78% off" — ${products.university.url}
+
+STRUCTURE:
+1. Open with a specific sim racing insight or question that hooks their attention — something they can relate to immediately. Do NOT open with "I noticed you signed up" or "thanks for joining" or anything about them being new.
+2. Naturally bridge to the free PDF as a resource that goes deeper on the topic.
+3. End with an OPEN LOOP QUESTION — something that invites them to hit reply. Make it specific and related to the topic. Examples: "What corner gives you the most trouble right now?", "Are you more of a brake-and-turn or trail-brake-in driver?", "Have you read it before? Curious what you thought."
+4. Sign off as Jimmy.
+
+IMPORTANT:
+- This is NOT personalized — same email goes to ~50 people. Don't reference any specific customer details.
+- Keep it 100-150 words.
+- The tone should feel like a knowledgeable mate reaching out, not a sales pitch.
+- The free PDF is the star — don't push paid products in this email.
+- The open loop question is critical — we want them to REPLY.`;
+
+  const insights = db.getSetting('self_learning_insights');
+  const fullPrompt = insights
+    ? userPrompt + `\n\nWRITING INSIGHTS (learned from email performance data):\n${insights}`
+    : userPrompt;
+
+  return callClaude(fullPrompt);
+}
+
+// Generate cold outreach follow-up for non-purchasers who didn't reply (batch)
+async function generateColdFollowup({ initialSubject, initialBody }) {
+  const userPrompt = `Write a FOLLOW-UP email to a cold outreach that got no reply. This is the ONE AND ONLY follow-up — it must count.
+
+THE INITIAL EMAIL THEY RECEIVED (2 days ago):
+Subject: ${initialSubject}
+Body:
+"""
+${initialBody}
+"""
+
+GOAL: Get them to reply. That's it. Not to sell, not to push another resource — just to start a conversation.
+
+DISCOUNT LANGUAGE RULES (use ONLY if you mention these products — do NOT lead with discounts):
+- Precision Racing book: "60% off" — ${products.book.url}
+- Sim Racing University: "78% off" — ${products.university.url}
+
+STRUCTURE:
+1. Acknowledge the previous email briefly and casually — don't be needy about it. Something like "Sent you something the other day about [topic]..." NOT "I noticed you haven't replied" or "Just following up..."
+2. Add ONE additional piece of genuine value or insight related to the initial email's topic. Something they can use immediately.
+3. End with a DIFFERENT open loop question than the initial email — simpler, lower-barrier. Something dead easy to reply to. Examples: "Quick question — what sim do you mainly drive?", "Curious — do you race online or mostly hotlap?"
+4. Sign off as Jimmy.
+5. Optionally, after the sign-off, include the trail braking PDF link one more time as a PS if it fits naturally: ${leadMagnets.trail_braking_pdf.url}
+
+IMPORTANT:
+- Same email goes to everyone who didn't reply to the initial. No personalization.
+- Keep it 80-120 words — shorter than the initial email.
+- Do NOT repeat the same CTA or the same question from the initial email.
+- The tone should be even more casual than the first email — like a "by the way" message.
+- Do NOT use "follow up" or "following up" language.`;
+
+  const insights = db.getSetting('self_learning_insights');
+  const fullPrompt = insights
+    ? userPrompt + `\n\nWRITING INSIGHTS (learned from email performance data):\n${insights}`
+    : userPrompt;
+
+  return callClaude(fullPrompt);
+}
+
 async function callClaude(userPrompt) {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -198,4 +273,4 @@ async function callClaude(userPrompt) {
   };
 }
 
-module.exports = { init, generateReply, generateOutreach, generateBroadcast };
+module.exports = { init, generateReply, generateOutreach, generateBroadcast, generateColdOutreach, generateColdFollowup };

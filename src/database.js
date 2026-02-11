@@ -118,6 +118,43 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_tracking_broadcast ON email_tracking(broadcast_id);
     CREATE INDEX IF NOT EXISTS idx_clicks_tracking ON tracking_clicks(tracking_id);
     CREATE INDEX IF NOT EXISTS idx_attributions_contact ON purchase_attributions(contact_id);
+
+    CREATE TABLE IF NOT EXISTS cold_outreach_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_type TEXT NOT NULL CHECK(batch_type IN ('initial', 'followup')),
+      subject TEXT,
+      body TEXT,
+      claude_reasoning TEXT,
+      status TEXT NOT NULL DEFAULT 'pending_approval'
+        CHECK(status IN ('pending_approval', 'approved', 'sending', 'sent', 'rejected', 'failed', 'expired')),
+      telegram_message_id TEXT,
+      total_contacts INTEGER DEFAULT 0,
+      sent_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cold_outreach_contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contact_id INTEGER NOT NULL,
+      batch_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued', 'sent', 'replied', 'followup_queued', 'followup_sent', 'completed', 'failed')),
+      initial_sent_at TEXT,
+      followup_batch_id INTEGER,
+      followup_sent_at TEXT,
+      replied_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (contact_id) REFERENCES contacts(id),
+      FOREIGN KEY (batch_id) REFERENCES cold_outreach_batches(id),
+      FOREIGN KEY (followup_batch_id) REFERENCES cold_outreach_batches(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cold_outreach_contact ON cold_outreach_contacts(contact_id);
+    CREATE INDEX IF NOT EXISTS idx_cold_outreach_status ON cold_outreach_contacts(status);
+    CREATE INDEX IF NOT EXISTS idx_cold_outreach_batch ON cold_outreach_contacts(batch_id);
   `);
 
   // Seed default settings
@@ -556,6 +593,210 @@ function getClickedUrlsForBroadcast(broadcastId) {
   `).all(broadcastId);
 }
 
+// --- Cold Outreach Batches ---
+
+function createColdOutreachBatch({ batchType, subject, body, claudeReasoning, totalContacts }) {
+  const result = db.prepare(
+    'INSERT INTO cold_outreach_batches (batch_type, subject, body, claude_reasoning, total_contacts) VALUES (?, ?, ?, ?, ?)'
+  ).run(batchType, subject, body, claudeReasoning || null, totalContacts || 0);
+  return getColdOutreachBatch(result.lastInsertRowid);
+}
+
+function getColdOutreachBatch(id) {
+  return db.prepare('SELECT * FROM cold_outreach_batches WHERE id = ?').get(id);
+}
+
+function updateColdOutreachBatchStatus(id, status) {
+  db.prepare(
+    "UPDATE cold_outreach_batches SET status = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(status, id);
+}
+
+function updateColdOutreachBatchTelegramId(id, telegramMessageId) {
+  db.prepare(
+    "UPDATE cold_outreach_batches SET telegram_message_id = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(String(telegramMessageId), id);
+}
+
+function updateColdOutreachBatchBody(id, body) {
+  db.prepare(
+    "UPDATE cold_outreach_batches SET body = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(body, id);
+}
+
+function updateColdOutreachBatchProgress(id, sentCount, failedCount) {
+  db.prepare(
+    "UPDATE cold_outreach_batches SET sent_count = ?, failed_count = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(sentCount, failedCount, id);
+}
+
+function getPendingColdOutreachBatch(batchType) {
+  return db.prepare(
+    "SELECT * FROM cold_outreach_batches WHERE status = 'pending_approval' AND batch_type = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(batchType);
+}
+
+// --- Cold Outreach Contacts ---
+
+function addColdOutreachContact({ contactId, batchId }) {
+  db.prepare(
+    'INSERT INTO cold_outreach_contacts (contact_id, batch_id) VALUES (?, ?)'
+  ).run(contactId, batchId);
+}
+
+function getColdOutreachContactsByBatch(batchId) {
+  return db.prepare(
+    `SELECT coc.*, c.email, c.name FROM cold_outreach_contacts coc
+     JOIN contacts c ON coc.contact_id = c.id
+     WHERE coc.batch_id = ?`
+  ).all(batchId);
+}
+
+function getFollowupContactsByBatch(followupBatchId) {
+  return db.prepare(
+    `SELECT coc.*, c.email, c.name FROM cold_outreach_contacts coc
+     JOIN contacts c ON coc.contact_id = c.id
+     WHERE coc.followup_batch_id = ?`
+  ).all(followupBatchId);
+}
+
+function getColdOutreachByContactId(contactId) {
+  return db.prepare(
+    'SELECT * FROM cold_outreach_contacts WHERE contact_id = ? LIMIT 1'
+  ).get(contactId);
+}
+
+function getColdOutreachByContactEmail(email) {
+  return db.prepare(
+    `SELECT coc.* FROM cold_outreach_contacts coc
+     JOIN contacts c ON coc.contact_id = c.id
+     WHERE c.email = ? COLLATE NOCASE
+     AND coc.status IN ('sent', 'followup_queued', 'followup_sent')
+     ORDER BY coc.created_at DESC LIMIT 1`
+  ).get(email);
+}
+
+function markColdOutreachInitialSent(id) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = 'sent', initial_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(id);
+}
+
+function markColdOutreachFollowupQueued(id, followupBatchId) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = 'followup_queued', followup_batch_id = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(followupBatchId, id);
+}
+
+function markColdOutreachFollowupSent(id) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = 'followup_sent', followup_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(id);
+}
+
+function markColdOutreachReplied(id) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = 'replied', replied_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(id);
+}
+
+function updateColdOutreachContactStatus(id, status) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(status, id);
+}
+
+function getEligibleColdOutreachContacts(limit) {
+  return db.prepare(
+    `SELECT c.* FROM contacts c
+     LEFT JOIN cold_outreach_contacts coc ON coc.contact_id = c.id
+     WHERE c.blacklisted = 0
+     AND (c.purchases = '[]' OR c.purchases IS NULL)
+     AND c.total_spent = 0
+     AND coc.id IS NULL
+     ORDER BY c.created_at ASC
+     LIMIT ?`
+  ).all(limit).map(parseContact);
+}
+
+function getContactsEligibleForFollowup() {
+  return db.prepare(
+    `SELECT coc.*, c.email, c.name FROM cold_outreach_contacts coc
+     JOIN contacts c ON coc.contact_id = c.id
+     WHERE coc.status = 'sent'
+     AND coc.initial_sent_at <= datetime('now', '-2 days')
+     ORDER BY coc.initial_sent_at ASC`
+  ).all();
+}
+
+function markCompletedAfterFollowup() {
+  const result = db.prepare(
+    `UPDATE cold_outreach_contacts
+     SET status = 'completed', updated_at = datetime('now')
+     WHERE status = 'followup_sent'
+     AND followup_sent_at <= datetime('now', '-3 days')`
+  ).run();
+  return result.changes;
+}
+
+function expireOldColdOutreachBatches() {
+  const expired = db.prepare(
+    `UPDATE cold_outreach_batches
+     SET status = 'expired', updated_at = datetime('now')
+     WHERE status = 'pending_approval'
+     AND created_at <= datetime('now', '-2 days')`
+  ).run();
+
+  if (expired.changes > 0) {
+    // Free contacts from expired initial batches
+    db.prepare(
+      `DELETE FROM cold_outreach_contacts
+       WHERE batch_id IN (SELECT id FROM cold_outreach_batches WHERE status = 'expired' AND batch_type = 'initial')
+       AND status = 'queued'`
+    ).run();
+
+    // Reset follow-up contacts from expired follow-up batches
+    db.prepare(
+      `UPDATE cold_outreach_contacts
+       SET status = 'sent', followup_batch_id = NULL, updated_at = datetime('now')
+       WHERE followup_batch_id IN (SELECT id FROM cold_outreach_batches WHERE status = 'expired' AND batch_type = 'followup')
+       AND status = 'followup_queued'`
+    ).run();
+  }
+
+  return expired.changes;
+}
+
+function deleteColdOutreachContactsByBatch(batchId) {
+  db.prepare(
+    "DELETE FROM cold_outreach_contacts WHERE batch_id = ? AND status = 'queued'"
+  ).run(batchId);
+}
+
+function resetFollowupContactsByBatch(followupBatchId) {
+  db.prepare(
+    "UPDATE cold_outreach_contacts SET status = 'sent', followup_batch_id = NULL, updated_at = datetime('now') WHERE followup_batch_id = ? AND status = 'followup_queued'"
+  ).run(followupBatchId);
+}
+
+function getColdOutreachStats() {
+  const total = db.prepare('SELECT COUNT(*) as c FROM cold_outreach_contacts').get().c;
+  const sent = db.prepare("SELECT COUNT(*) as c FROM cold_outreach_contacts WHERE status = 'sent'").get().c;
+  const replied = db.prepare("SELECT COUNT(*) as c FROM cold_outreach_contacts WHERE status = 'replied'").get().c;
+  const followupSent = db.prepare("SELECT COUNT(*) as c FROM cold_outreach_contacts WHERE status = 'followup_sent'").get().c;
+  const completed = db.prepare("SELECT COUNT(*) as c FROM cold_outreach_contacts WHERE status = 'completed'").get().c;
+  const pendingBatches = db.prepare("SELECT COUNT(*) as c FROM cold_outreach_batches WHERE status = 'pending_approval'").get().c;
+  const eligible = db.prepare(
+    `SELECT COUNT(*) as c FROM contacts c
+     LEFT JOIN cold_outreach_contacts coc ON coc.contact_id = c.id
+     WHERE c.blacklisted = 0
+     AND (c.purchases = '[]' OR c.purchases IS NULL)
+     AND c.total_spent = 0
+     AND coc.id IS NULL`
+  ).get().c;
+  return { total, sent, replied, followupSent, completed, pendingBatches, eligible };
+}
+
 function getDb() {
   return db;
 }
@@ -603,4 +844,28 @@ module.exports = {
   getAnalytics,
   getBroadcastsWithPerformance,
   getClickedUrlsForBroadcast,
+  createColdOutreachBatch,
+  getColdOutreachBatch,
+  updateColdOutreachBatchStatus,
+  updateColdOutreachBatchTelegramId,
+  updateColdOutreachBatchBody,
+  updateColdOutreachBatchProgress,
+  getPendingColdOutreachBatch,
+  addColdOutreachContact,
+  getColdOutreachContactsByBatch,
+  getFollowupContactsByBatch,
+  getColdOutreachByContactId,
+  getColdOutreachByContactEmail,
+  markColdOutreachInitialSent,
+  markColdOutreachFollowupQueued,
+  markColdOutreachFollowupSent,
+  markColdOutreachReplied,
+  updateColdOutreachContactStatus,
+  getEligibleColdOutreachContacts,
+  getContactsEligibleForFollowup,
+  markCompletedAfterFollowup,
+  expireOldColdOutreachBatches,
+  deleteColdOutreachContactsByBatch,
+  resetFollowupContactsByBatch,
+  getColdOutreachStats,
 };

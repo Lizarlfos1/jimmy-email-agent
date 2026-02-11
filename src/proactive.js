@@ -12,6 +12,7 @@ let syncJob;
 let outreachJob;
 let broadcastJob;
 let learningJob;
+let coldOutreachJob;
 
 function init() {
   // Sync contacts from CRM daily at 2am
@@ -60,7 +61,28 @@ function init() {
     }
   }, { timezone: 'Australia/Sydney' });
 
-  console.log('[Cron] Scheduled: sync 2am, broadcasts Mon/Thu/Sat 9am, self-learning biweekly Sun 3am');
+  // Cold outreach: daily at 10am AEST
+  coldOutreachJob = cron.schedule('0 10 * * *', async () => {
+    console.log('[Cron] Running daily cold outreach...');
+    try {
+      // Expire stale batches first
+      const expired = db.expireOldColdOutreachBatches();
+      if (expired > 0) {
+        console.log(`[ColdOutreach] Expired ${expired} stale batch(es).`);
+      }
+
+      // Follow-ups first (time-sensitive — contacts from 2+ days ago)
+      await generateColdFollowupBatch();
+
+      // Then new initial outreach
+      await generateColdOutreachBatch();
+    } catch (err) {
+      console.error('[Cron] Cold outreach failed:', err);
+      await telegram.sendMessage(`❌ Cold outreach failed: ${err.message}`);
+    }
+  }, { timezone: 'Australia/Sydney' });
+
+  console.log('[Cron] Scheduled: sync 2am, cold outreach 10am, broadcasts Mon/Thu/Sat 9am, self-learning biweekly Sun 3am');
 }
 
 async function syncContacts() {
@@ -270,4 +292,188 @@ async function sendBroadcastTest(broadcastId, testEmails) {
   return { sent, failed, total: testEmails.length };
 }
 
-module.exports = { init, syncContacts, runOutreach, generateBroadcast, sendBroadcastToAll, sendBroadcastTest };
+// --- Cold Outreach ---
+
+async function generateColdOutreachBatch() {
+  // Guard: skip if pending initial batch exists
+  const pendingInitial = db.getPendingColdOutreachBatch('initial');
+  if (pendingInitial) {
+    console.log(`[ColdOutreach] Pending initial batch #${pendingInitial.id} exists. Skipping.`);
+    await telegram.sendMessage(
+      `⏸️ Cold outreach: Skipping today — batch #${pendingInitial.id} is still awaiting approval.`
+    );
+    return null;
+  }
+
+  const limit = parseInt(process.env.COLD_OUTREACH_DAILY_LIMIT || '50', 10);
+  const eligible = db.getEligibleColdOutreachContacts(limit);
+  if (eligible.length === 0) {
+    console.log('[ColdOutreach] No eligible contacts for cold outreach.');
+    await telegram.sendMessage('📭 Cold outreach: No eligible non-purchasers found today.');
+    return null;
+  }
+
+  let draft;
+  try {
+    draft = await emailBrain.generateColdOutreach();
+  } catch (err) {
+    console.error('[ColdOutreach] Failed to generate initial email:', err.message);
+    throw err;
+  }
+
+  const batch = db.createColdOutreachBatch({
+    batchType: 'initial',
+    subject: draft.subject,
+    body: draft.body,
+    claudeReasoning: draft.reasoning,
+    totalContacts: eligible.length,
+  });
+
+  for (const contact of eligible) {
+    db.addColdOutreachContact({ contactId: contact.id, batchId: batch.id });
+  }
+
+  console.log(`[ColdOutreach] Created initial batch #${batch.id} with ${eligible.length} contacts`);
+  await telegram.sendColdOutreachApproval(batch, eligible.length, 'initial');
+
+  return batch;
+}
+
+async function generateColdFollowupBatch() {
+  // Guard: skip if pending followup batch exists
+  const pendingFollowup = db.getPendingColdOutreachBatch('followup');
+  if (pendingFollowup) {
+    console.log(`[ColdOutreach] Pending followup batch #${pendingFollowup.id} exists. Skipping.`);
+    return null;
+  }
+
+  // Cleanup: mark completed those who didn't reply to the follow-up
+  const completedCount = db.markCompletedAfterFollowup();
+  if (completedCount > 0) {
+    console.log(`[ColdOutreach] Marked ${completedCount} contacts as completed (no reply to follow-up).`);
+  }
+
+  const eligible = db.getContactsEligibleForFollowup();
+  if (eligible.length === 0) {
+    console.log('[ColdOutreach] No contacts eligible for follow-up today.');
+    return null;
+  }
+
+  // Get the initial batch content to reference in the follow-up
+  const initialBatch = db.getColdOutreachBatch(eligible[0].batch_id);
+  if (!initialBatch) {
+    console.error('[ColdOutreach] Could not find initial batch for follow-up generation.');
+    return null;
+  }
+
+  let draft;
+  try {
+    draft = await emailBrain.generateColdFollowup({
+      initialSubject: initialBatch.subject,
+      initialBody: initialBatch.body,
+    });
+  } catch (err) {
+    console.error('[ColdOutreach] Failed to generate follow-up email:', err.message);
+    throw err;
+  }
+
+  const batch = db.createColdOutreachBatch({
+    batchType: 'followup',
+    subject: draft.subject,
+    body: draft.body,
+    claudeReasoning: draft.reasoning,
+    totalContacts: eligible.length,
+  });
+
+  for (const coc of eligible) {
+    db.markColdOutreachFollowupQueued(coc.id, batch.id);
+  }
+
+  console.log(`[ColdOutreach] Created follow-up batch #${batch.id} with ${eligible.length} contacts`);
+  await telegram.sendColdOutreachApproval(batch, eligible.length, 'followup');
+
+  return batch;
+}
+
+async function sendColdOutreachBatchToAll(batchId) {
+  const batch = db.getColdOutreachBatch(batchId);
+  if (!batch) throw new Error('Cold outreach batch not found');
+
+  db.updateColdOutreachBatchStatus(batchId, 'sending');
+
+  const isFollowup = batch.batch_type === 'followup';
+  const contacts = isFollowup
+    ? db.getFollowupContactsByBatch(batchId)
+    : db.getColdOutreachContactsByBatch(batchId);
+
+  let sent = 0;
+  let failed = 0;
+
+  await telegram.sendMessage(
+    `📤 Sending cold outreach ${isFollowup ? 'follow-up' : 'initial'} batch #${batchId} to ${contacts.length} contacts...`
+  );
+
+  for (let i = 0; i < contacts.length; i++) {
+    const coc = contacts[i];
+    try {
+      const contact = db.getContact(coc.contact_id);
+      if (!contact || contact.blacklisted) {
+        failed++;
+        continue;
+      }
+
+      // Create a thread per contact for tracking + reply history
+      const thread = db.createThread({
+        contactId: contact.id,
+        direction: 'outbound',
+        subject: batch.subject,
+        body: batch.body,
+        status: 'sent',
+        claudeReasoning: batch.claude_reasoning,
+      });
+
+      const tracked = tracking.prepareTrackedEmail({
+        contactId: contact.id,
+        threadId: thread.id,
+        body: batch.body,
+      });
+
+      await emailSender.send({
+        to: contact.email,
+        subject: batch.subject,
+        body: tracked.textBody,
+        htmlBody: tracked.htmlBody,
+      });
+
+      if (isFollowup) {
+        db.markColdOutreachFollowupSent(coc.id);
+      } else {
+        db.markColdOutreachInitialSent(coc.id);
+      }
+      db.updateContactLastEmailSent(contact.id);
+      sent++;
+    } catch (err) {
+      console.error(`[ColdOutreach] Failed to send to ${coc.email}:`, err.message);
+      db.updateColdOutreachContactStatus(coc.id, 'failed');
+      failed++;
+    }
+
+    // SES rate limit delay
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  db.updateColdOutreachBatchProgress(batchId, sent, failed);
+  db.updateColdOutreachBatchStatus(batchId, failed === contacts.length ? 'failed' : 'sent');
+
+  await telegram.sendMessage(
+    `✅ Cold outreach ${isFollowup ? 'follow-up' : 'initial'} batch #${batchId} complete!\n` +
+    `Sent: ${sent} | Failed: ${failed} | Total: ${contacts.length}`
+  );
+
+  return { sent, failed, total: contacts.length };
+}
+
+module.exports = {
+  init, syncContacts, runOutreach, generateBroadcast, sendBroadcastToAll, sendBroadcastTest,
+  generateColdOutreachBatch, generateColdFollowupBatch, sendColdOutreachBatchToAll,
+};

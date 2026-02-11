@@ -32,6 +32,18 @@ function verifyWebhook(req, res, next) {
   next();
 }
 
+// --- Cold outreach reply detection ---
+function handleColdOutreachReply(contact) {
+  const cocRecord = db.getColdOutreachByContactEmail(contact.email);
+  if (cocRecord) {
+    db.markColdOutreachReplied(cocRecord.id);
+    console.log(`[ColdOutreach] Contact ${contact.email} replied — marked as replied in funnel.`);
+    telegram.sendMessage(
+      `🎉 Cold outreach reply! ${contact.name || contact.email} replied to the funnel.`
+    ).catch(() => {});
+  }
+}
+
 // --- Health check ---
 app.get('/health', (req, res) => {
   const stats = db.getStats();
@@ -72,6 +84,9 @@ app.post('/webhook/inbound-email', verifyWebhook, async (req, res) => {
       status: 'received',
     });
     db.updateContactLastEmailReceived(contact.id);
+
+    // Check cold outreach pipeline
+    handleColdOutreachReply(contact);
 
     // Refresh contact profile from WooCommerce
     try {
@@ -291,6 +306,9 @@ app.post('/webhook/ses-inbound', async (req, res) => {
         status: 'received',
       });
       db.updateContactLastEmailReceived(contact.id);
+
+      // Check cold outreach pipeline
+      handleColdOutreachReply(contact);
 
       // Refresh profile from WooCommerce
       try {

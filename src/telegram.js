@@ -49,6 +49,8 @@ function registerCommands() {
       `/analytics [days] — Open/click/purchase stats (default 30 days)\n` +
       `/learn — Run self-learning analysis on past email performance\n` +
       `/insights — View current learned email writing insights\n` +
+      `/coldoutreach — Run daily cold outreach for non-purchasers\n` +
+      `/coldstatus — View cold outreach pipeline stats\n` +
       `/blacklist email — Block a contact from receiving emails\n` +
       `/unblacklist email — Unblock a contact`;
 
@@ -259,6 +261,36 @@ function registerCommands() {
     );
   });
 
+  bot.command('coldoutreach', async (ctx) => {
+    await ctx.reply('❄️ Starting cold outreach generation...');
+    try {
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      // Expire stale batches
+      db.expireOldColdOutreachBatches();
+      // Follow-ups first, then new initial outreach
+      await proactiveModule.generateColdFollowupBatch();
+      await proactiveModule.generateColdOutreachBatch();
+    } catch (err) {
+      console.error('[Telegram] Cold outreach error:', err);
+      await ctx.reply(`❌ Cold outreach generation failed: ${err.message}`);
+    }
+  });
+
+  bot.command('coldstatus', async (ctx) => {
+    const stats = db.getColdOutreachStats();
+    await ctx.reply(
+      `❄️ *Cold Outreach Pipeline*\n\n` +
+      `Eligible (remaining): ${stats.eligible}\n` +
+      `Total contacted: ${stats.total}\n` +
+      `Awaiting follow-up: ${stats.sent}\n` +
+      `Follow-up sent: ${stats.followupSent}\n` +
+      `Replied: ${stats.replied}\n` +
+      `Completed (no reply): ${stats.completed}\n` +
+      `Pending batches: ${stats.pendingBatches}`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
   bot.command('pending', async (ctx) => {
     const pending = db.getPendingApprovals();
     if (pending.length === 0) {
@@ -451,6 +483,92 @@ function registerCallbacks() {
     }
   });
 
+  // --- Cold Outreach callbacks ---
+
+  bot.action(/^approve_cold:(\d+)$/, async (ctx) => {
+    try {
+      const batchId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Approve cold outreach batch #${batchId}`);
+      const batch = db.getColdOutreachBatch(batchId);
+      if (!batch) {
+        await ctx.answerCbQuery('Batch not found');
+        return;
+      }
+      if (batch.status !== 'pending_approval') {
+        await ctx.answerCbQuery(`Already ${batch.status}`);
+        return;
+      }
+
+      db.updateColdOutreachBatchStatus(batchId, 'approved');
+      await ctx.answerCbQuery('Approved! Sending to all contacts...');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+
+      if (!proactiveModule) proactiveModule = require('./proactive');
+      proactiveModule.sendColdOutreachBatchToAll(batchId).catch(err => {
+        console.error('[Telegram] Cold outreach send error:', err);
+        sendMessage(`❌ Cold outreach batch #${batchId} failed: ${err.message}`);
+      });
+    } catch (err) {
+      console.error('[Telegram] Cold outreach approve error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
+  bot.action(/^reject_cold:(\d+)$/, async (ctx) => {
+    try {
+      const batchId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Reject cold outreach batch #${batchId}`);
+      const batch = db.getColdOutreachBatch(batchId);
+      if (!batch) {
+        await ctx.answerCbQuery('Batch not found');
+        return;
+      }
+      db.updateColdOutreachBatchStatus(batchId, 'rejected');
+      await ctx.answerCbQuery('Batch rejected');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+
+      // Free contacts so they're re-eligible
+      if (batch.batch_type === 'initial') {
+        db.deleteColdOutreachContactsByBatch(batchId);
+      } else {
+        db.resetFollowupContactsByBatch(batchId);
+      }
+
+      await sendMessage(`❌ Cold outreach batch #${batchId} rejected.`);
+    } catch (err) {
+      console.error('[Telegram] Cold outreach reject error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
+  bot.action(/^edit_cold:(\d+)$/, async (ctx) => {
+    try {
+      const batchId = parseInt(ctx.match[1]);
+      console.log(`[Telegram] Edit cold outreach batch #${batchId}`);
+      await ctx.answerCbQuery('Send me the edited email text');
+      await sendMessage(
+        `✏️ Reply with the edited email body for cold outreach batch #${batchId}.\n` +
+        `The subject line won't change. Just send the new body text.`
+      );
+
+      bot.on('text', async function editColdHandler(editCtx) {
+        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
+        bot.off('text', editColdHandler);
+
+        const newBody = editCtx.message.text;
+        db.updateColdOutreachBatchBody(batchId, newBody);
+        db.updateColdOutreachBatchStatus(batchId, 'pending_approval');
+
+        const batch = db.getColdOutreachBatch(batchId);
+        await sendMessage('✅ Cold outreach batch updated. Resending for approval...');
+        await sendColdOutreachApproval(batch, batch.total_contacts, batch.batch_type);
+      });
+    } catch (err) {
+      console.error('[Telegram] Cold outreach edit error:', err);
+      await ctx.answerCbQuery('Error — check logs').catch(() => {});
+    }
+  });
+
   // --- Per-contact email callbacks ---
 
   bot.action(/^edit:(\d+)$/, async (ctx) => {
@@ -564,6 +682,31 @@ async function sendTestBroadcastApproval(broadcast, testEmails) {
   db.updateBroadcastTelegramId(broadcast.id, msg.message_id);
 }
 
+// Send a cold outreach batch to Telegram for approval
+async function sendColdOutreachApproval(batch, contactCount, type) {
+  const typeLabel = type === 'followup' ? '🔄 FOLLOW-UP' : '🆕 INITIAL';
+  const text =
+    `❄️ *Cold Outreach — ${typeLabel}*\n\n` +
+    `*Recipients:* ${contactCount} non-purchaser(s)\n` +
+    `*Subject:* ${escapeMd(batch.subject || '(no subject)')}\n\n` +
+    `---\n${escapeMd(batch.body)}\n---\n\n` +
+    (batch.claude_reasoning ? `💡 *Strategy:* ${escapeMd(batch.claude_reasoning)}\n\n` : '') +
+    `Cold Outreach Batch #${batch.id}`;
+
+  const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Send to All', `approve_cold:${batch.id}`),
+        Markup.button.callback('❌ Reject', `reject_cold:${batch.id}`),
+        Markup.button.callback('✏️ Edit', `edit_cold:${batch.id}`),
+      ],
+    ]),
+  });
+
+  db.updateColdOutreachBatchTelegramId(batch.id, msg.message_id);
+}
+
 // Send a plain notification (used by other modules)
 async function sendMessage(text, parseMode = 'Markdown') {
   if (!bot) return;
@@ -593,6 +736,7 @@ module.exports = {
   sendApprovalRequest,
   sendBroadcastApproval,
   sendTestBroadcastApproval,
+  sendColdOutreachApproval,
   sendMessage,
   sendAutoApproveNotification,
 };
