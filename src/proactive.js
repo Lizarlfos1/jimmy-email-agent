@@ -61,8 +61,8 @@ function init() {
     }
   }, { timezone: 'Australia/Sydney' });
 
-  // Cold outreach: daily at 10am AEST
-  coldOutreachJob = cron.schedule('0 10 * * *', async () => {
+  // Cold outreach: Sun/Tue/Wed/Fri at 7pm AEST (non-broadcast days)
+  coldOutreachJob = cron.schedule('0 19 * * 0,2,3,5', async () => {
     console.log('[Cron] Running daily cold outreach...');
     try {
       // Expire stale batches first
@@ -82,7 +82,7 @@ function init() {
     }
   }, { timezone: 'Australia/Sydney' });
 
-  console.log('[Cron] Scheduled: sync 2am, cold outreach 10am, broadcasts Mon/Thu/Sat 9am, self-learning biweekly Sun 3am');
+  console.log('[Cron] Scheduled: sync 2am, broadcasts Mon/Thu/Sat 9am, cold outreach Sun/Tue/Wed/Fri 7pm, self-learning biweekly Sun 3am');
 }
 
 async function syncContacts() {
