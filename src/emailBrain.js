@@ -165,31 +165,52 @@ IMPORTANT:
 
 // Generate cold outreach email for non-purchasers (batch — same email for all)
 async function generateColdOutreach() {
-  const userPrompt = `Write a COLD OUTREACH email for Jimmy's mailing list subscribers who have NOT purchased anything yet.
+  const userPrompt = `Write a COLD OUTREACH email that feels like a PERSONAL 1-on-1 message from Jimmy — NOT a broadcast or newsletter.
 
-GOAL: Offer genuine free value to start a relationship. The primary CTA is the Advanced Trail Braking Framework (free PDF).
+GOAL: Start a conversation. Offer the free Advanced Trail Braking Framework PDF as a genuine gift, and get them to reply.
 
 FREE RESOURCE TO OFFER:
 - Advanced Trail Braking Framework (PDF) — FREE
 - Link: ${leadMagnets.trail_braking_pdf.url}
 - What it covers: ${leadMagnets.trail_braking_pdf.description}
 
-DISCOUNT LANGUAGE RULES (use ONLY if you mention these products — do NOT lead with discounts):
-- Precision Racing book: "60% off" — ${products.book.url}
-- Sim Racing University: "78% off" — ${products.university.url}
+TONE & STYLE — THIS IS CRITICAL:
+- This must read like Jimmy personally sat down and wrote this email to ONE person. Like a mate checking in.
+- Subject line should be casual and personal — something like "Quick question for you", "Thought of you", "Curious about something" — NOT a newsletter-style subject.
+- Start with "Hey," (no name — we don't have it). No "Hey there" or "Hi everyone".
+- Short, conversational paragraphs. Like a text message turned into an email.
+- Do NOT use any broadcast/newsletter language: "I wanted to share", "I'm excited to announce", "check out our latest", etc.
+- Do NOT open with a teaching moment or insight dump. Open like you're mid-conversation — ask a question, share a quick thought, be curious about them.
 
 STRUCTURE:
-1. Open with a specific sim racing insight or question that hooks their attention — something they can relate to immediately. Do NOT open with "I noticed you signed up" or "thanks for joining" or anything about them being new.
-2. Naturally bridge to the free PDF as a resource that goes deeper on the topic.
-3. End with an OPEN LOOP QUESTION — something that invites them to hit reply. Make it specific and related to the topic. Examples: "What corner gives you the most trouble right now?", "Are you more of a brake-and-turn or trail-brake-in driver?", "Have you read it before? Curious what you thought."
+1. Open casually — ask a question or share a brief thought that invites them in. Something like "I've been working on X lately and it got me thinking..." or "Quick one for you —"
+2. Bridge naturally to the free PDF. Frame it as something you put together that they might find useful, not as a "resource" or "guide" you're "offering". Just drop the link casually: ${leadMagnets.trail_braking_pdf.url}
+3. End with an OPEN LOOP QUESTION — something dead easy to reply to. Make it feel like you genuinely want to know. Examples: "What's the one thing you're working on improving right now?", "Have you given it a read before? Curious what you thought.", "What sim are you mainly driving at the moment?"
 4. Sign off as Jimmy.
 
+EXAMPLE OF THE RIGHT FEEL (don't copy this verbatim, but match the vibe):
+"""
+Subject: Quick question for you
+
+Hey,
+
+I've been putting together some new content on trail braking lately and it got me thinking — are you someone who's been working on their braking technique, or is it more of a "I know I should but haven't really dug into it" kind of thing?
+
+No judgement either way — most people fall into the second camp until something clicks.
+
+I actually put together a free PDF that breaks down an advanced trail braking framework step by step. It's the same stuff I teach in my course, just condensed into something you can read before your next session: ${leadMagnets.trail_braking_pdf.url}
+
+If you've already seen it, I'd genuinely love to know what you thought. And if not — what's the one thing you're working on improving right now?
+
+Jimmy
+"""
+
 IMPORTANT:
-- This is NOT personalized — same email goes to ~50 people. Don't reference any specific customer details.
+- Same email goes to ~50 people but it must NOT feel like it. No personalization details needed — just make it feel 1-on-1.
 - Keep it 100-150 words.
-- The tone should feel like a knowledgeable mate reaching out, not a sales pitch.
 - The free PDF is the star — don't push paid products in this email.
-- The open loop question is critical — we want them to REPLY.`;
+- The open loop question is critical — we want them to REPLY.
+- Do NOT mention discounts, courses, or books in this email.`;
 
   const insights = db.getSetting('self_learning_insights');
   const fullPrompt = insights
