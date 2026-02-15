@@ -14,6 +14,22 @@ let broadcastJob;
 let learningJob;
 let coldOutreachJob;
 
+async function retryOnOverload(fn, label, maxRetries = 3, delayMs = 30000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isOverloaded = err.message && err.message.includes('overloaded');
+      if (isOverloaded && attempt < maxRetries) {
+        console.log(`[${label}] API overloaded (attempt ${attempt}/${maxRetries}). Retrying in ${delayMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 function init() {
   // Sync contacts from CRM daily at 2am
   syncJob = cron.schedule('0 2 * * *', async () => {
@@ -170,7 +186,7 @@ async function generateBroadcast({ testEmails } = {}) {
 
   let draft;
   try {
-    draft = await emailBrain.generateBroadcast();
+    draft = await retryOnOverload(() => emailBrain.generateBroadcast(), 'Broadcast');
   } catch (err) {
     console.error('[Broadcast] Failed to generate:', err.message);
     throw err;
@@ -315,7 +331,7 @@ async function generateColdOutreachBatch() {
 
   let draft;
   try {
-    draft = await emailBrain.generateColdOutreach();
+    draft = await retryOnOverload(() => emailBrain.generateColdOutreach(), 'ColdOutreach');
   } catch (err) {
     console.error('[ColdOutreach] Failed to generate initial email:', err.message);
     throw err;
@@ -368,10 +384,10 @@ async function generateColdFollowupBatch() {
 
   let draft;
   try {
-    draft = await emailBrain.generateColdFollowup({
+    draft = await retryOnOverload(() => emailBrain.generateColdFollowup({
       initialSubject: initialBatch.subject,
       initialBody: initialBatch.body,
-    });
+    }), 'ColdOutreach');
   } catch (err) {
     console.error('[ColdOutreach] Failed to generate follow-up email:', err.message);
     throw err;
