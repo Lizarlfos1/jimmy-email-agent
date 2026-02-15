@@ -39,11 +39,13 @@ function isAutomatedEmail(fromEmail, subject) {
   if (lower.startsWith('postmaster@')) return true;
   if (lower.startsWith('noreply@') || lower.startsWith('no-reply@')) return true;
   if (lower.includes('amazonses.com')) return true;
+  if (lower.startsWith('dmarcreport@') || lower.startsWith('dmarc-noreply@') || lower.startsWith('dmarc@')) return true;
   const subLower = (subject || '').toLowerCase();
   if (subLower.includes('delivery status notification')) return true;
   if (subLower.includes('undeliverable') || subLower.includes('undelivered')) return true;
   if (subLower.includes('mail delivery failed')) return true;
   if (subLower.includes('failure notice')) return true;
+  if (subLower.includes('dmarc') && subLower.includes('report')) return true;
   return false;
 }
 
