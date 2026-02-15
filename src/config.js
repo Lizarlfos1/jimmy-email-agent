@@ -37,9 +37,16 @@ const leadMagnets = {
   driving_drills_pdf: {
     id: 'driving_drills_pdf',
     name: '3 Must-Know Driving Drills (PDF)',
-    url: 'https://jimmygrills.com/wp-content/uploads/2025/11/3-Must-Know-Driving-Exercises-Jimmy-Grills.pdf',
+    url: 'https://jimmygrills.com/wp-content/uploads/2026/02/3_Must_Know_Driving_Drills-1.pdf',
     description: 'Free PDF with 3 practical driving exercises to improve consistency',
     topics: ['drills', 'exercises', 'practice', 'consistency', 'fundamentals'],
+  },
+  steering_technique_pdf: {
+    id: 'steering_technique_pdf',
+    name: 'Steering Technique Framework (PDF)',
+    url: 'https://jimmygrills.com/wp-content/uploads/2026/02/Steering_Technique_Framework.pdf',
+    description: 'Free PDF guide on steering technique and inputs',
+    topics: ['steering', 'steering technique', 'inputs', 'hand position', 'cornering'],
   },
   throttle_audit: {
     id: 'throttle_audit',
