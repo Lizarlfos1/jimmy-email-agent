@@ -670,14 +670,21 @@ async function sendApprovalRequest(contact, thread) {
     ? contact.purchases.join(', ')
     : 'None';
 
+  // Find the most recent inbound message from this contact
+  const recentThreads = db.getThreadsByContact(contact.id, 10);
+  const lastInbound = recentThreads.find(t => t.direction === 'inbound');
+  const inboundSection = lastInbound
+    ? `📩 *Their last message:*\n${escapeMd((lastInbound.body || '').slice(0, 500))}\n\n`
+    : '';
+
   const text =
     `📧 *New Email Draft*\n\n` +
     `*To:* ${escapeMd(contact.name || 'Unknown')} <${escapeMd(contact.email)}>\n` +
     `*Purchases:* ${escapeMd(purchaseSummary)}\n` +
     `*Total spent:* $${(contact.total_spent || 0).toFixed(2)}\n\n` +
+    inboundSection +
     `*Subject:* ${escapeMd(thread.subject || '(no subject)')}\n\n` +
     `---\n${escapeMd(thread.body)}\n---\n\n` +
-    (thread.claude_reasoning ? `💡 *Strategy:* ${escapeMd(thread.claude_reasoning)}\n\n` : '') +
     `Draft #${thread.id}`;
 
   const msg = await bot.telegram.sendMessage(CHAT_ID(), text, {
