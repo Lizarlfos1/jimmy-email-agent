@@ -10,6 +10,7 @@ function escapeMd(text) {
 
 let bot;
 let proactiveModule; // lazy-loaded to avoid circular deps
+let pendingEdit = null; // { type: 'thread'|'broadcast'|'cold', id: number }
 
 const CHAT_ID = () => process.env.TELEGRAM_CHAT_ID;
 
@@ -24,6 +25,85 @@ function init() {
 
   bot.catch((err, ctx) => {
     console.error('[Telegram] Unhandled bot error:', err);
+  });
+
+  // Handle pending edit instructions (must be before command registration)
+  bot.on('text', async (ctx) => {
+    if (!pendingEdit) return; // no pending edit, let other handlers run
+    if (String(ctx.chat?.id) !== CHAT_ID()) return;
+
+    // If the message is a command, cancel the edit and let commands handle it
+    if (ctx.message.text.startsWith('/')) {
+      pendingEdit = null;
+      return;
+    }
+
+    const edit = pendingEdit;
+    pendingEdit = null; // clear immediately so next messages pass through
+
+    const instructions = ctx.message.text;
+    await sendMessage('🔄 Rewriting...');
+
+    try {
+      if (edit.type === 'thread') {
+        const thread = db.getThread(edit.id);
+        const rewritten = await emailBrain.rewriteEmail({
+          subject: thread.subject,
+          body: thread.body,
+          instructions,
+        });
+        db.updateThreadBody(edit.id, rewritten.body);
+        db.updateThreadSubject(edit.id, rewritten.subject);
+        db.updateThreadStatus(edit.id, 'pending_approval');
+        const updatedThread = db.getThread(edit.id);
+        const contact = db.getContact(thread.contact_id);
+        await sendApprovalRequest(contact, updatedThread);
+
+      } else if (edit.type === 'broadcast') {
+        const broadcast = db.getBroadcast(edit.id);
+        const rewritten = await emailBrain.rewriteEmail({
+          subject: broadcast.subject,
+          body: broadcast.body,
+          instructions,
+        });
+        db.updateBroadcastBody(edit.id, rewritten.body);
+        db.updateBroadcastSubject(edit.id, rewritten.subject);
+        db.updateBroadcastStatus(edit.id, 'pending_approval');
+        const updated = db.getBroadcast(edit.id);
+        await sendBroadcastApproval(updated);
+
+      } else if (edit.type === 'cold') {
+        const batch = db.getColdOutreachBatch(edit.id);
+        const rewritten = await emailBrain.rewriteEmail({
+          subject: batch.subject,
+          body: batch.body,
+          instructions,
+        });
+        db.updateColdOutreachBatchBody(edit.id, rewritten.body);
+        db.updateColdOutreachBatchSubject(edit.id, rewritten.subject);
+        db.updateColdOutreachBatchStatus(edit.id, 'pending_approval');
+        const updated = db.getColdOutreachBatch(edit.id);
+        await sendColdOutreachApproval(updated, updated.total_contacts, updated.batch_type);
+      }
+    } catch (err) {
+      console.error(`[Telegram] AI rewrite failed for ${edit.type} #${edit.id}:`, err);
+      await sendMessage(`❌ Rewrite failed: ${err.message}`);
+      // Re-show original for approval
+      if (edit.type === 'thread') {
+        db.updateThreadStatus(edit.id, 'pending_approval');
+        const thread = db.getThread(edit.id);
+        const contact = db.getContact(thread.contact_id);
+        await sendApprovalRequest(contact, thread);
+      } else if (edit.type === 'broadcast') {
+        db.updateBroadcastStatus(edit.id, 'pending_approval');
+        const broadcast = db.getBroadcast(edit.id);
+        await sendBroadcastApproval(broadcast);
+      } else if (edit.type === 'cold') {
+        db.updateColdOutreachBatchStatus(edit.id, 'pending_approval');
+        const batch = db.getColdOutreachBatch(edit.id);
+        await sendColdOutreachApproval(batch, batch.total_contacts, batch.batch_type);
+      }
+    }
   });
 
   registerCommands();
@@ -467,38 +547,11 @@ function registerCallbacks() {
       }
       await ctx.answerCbQuery('Tell me what to change');
       await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      pendingEdit = { type: 'broadcast', id: broadcastId };
       await sendMessage(
         `✏️ *Editing broadcast #${broadcastId}*\n\nWhat would you like to change? Describe the changes and I'll rewrite it.`,
         'Markdown'
       );
-
-      bot.on('text', async function editBcHandler(editCtx) {
-        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
-        bot.off('text', editBcHandler);
-
-        const instructions = editCtx.message.text;
-        await sendMessage('🔄 Rewriting...');
-
-        try {
-          const rewritten = await emailBrain.rewriteEmail({
-            subject: broadcast.subject,
-            body: broadcast.body,
-            instructions,
-          });
-
-          db.updateBroadcastBody(broadcastId, rewritten.body);
-          db.updateBroadcastSubject(broadcastId, rewritten.subject);
-          db.updateBroadcastStatus(broadcastId, 'pending_approval');
-
-          const updated = db.getBroadcast(broadcastId);
-          await sendBroadcastApproval(updated);
-        } catch (err) {
-          console.error('[Telegram] Broadcast AI rewrite failed:', err);
-          await sendMessage(`❌ Rewrite failed: ${err.message}`);
-          db.updateBroadcastStatus(broadcastId, 'pending_approval');
-          await sendBroadcastApproval(broadcast);
-        }
-      });
     } catch (err) {
       console.error('[Telegram] Broadcast edit error:', err);
       await ctx.answerCbQuery('Error — check logs').catch(() => {});
@@ -574,38 +627,11 @@ function registerCallbacks() {
       }
       await ctx.answerCbQuery('Tell me what to change');
       await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      pendingEdit = { type: 'cold', id: batchId };
       await sendMessage(
         `✏️ *Editing cold outreach batch #${batchId}*\n\nWhat would you like to change? Describe the changes and I'll rewrite it.`,
         'Markdown'
       );
-
-      bot.on('text', async function editColdHandler(editCtx) {
-        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
-        bot.off('text', editColdHandler);
-
-        const instructions = editCtx.message.text;
-        await sendMessage('🔄 Rewriting...');
-
-        try {
-          const rewritten = await emailBrain.rewriteEmail({
-            subject: batch.subject,
-            body: batch.body,
-            instructions,
-          });
-
-          db.updateColdOutreachBatchBody(batchId, rewritten.body);
-          db.updateColdOutreachBatchSubject(batchId, rewritten.subject);
-          db.updateColdOutreachBatchStatus(batchId, 'pending_approval');
-
-          const updated = db.getColdOutreachBatch(batchId);
-          await sendColdOutreachApproval(updated, updated.total_contacts, updated.batch_type);
-        } catch (err) {
-          console.error('[Telegram] Cold outreach AI rewrite failed:', err);
-          await sendMessage(`❌ Rewrite failed: ${err.message}`);
-          db.updateColdOutreachBatchStatus(batchId, 'pending_approval');
-          await sendColdOutreachApproval(batch, batch.total_contacts, batch.batch_type);
-        }
-      });
     } catch (err) {
       console.error('[Telegram] Cold outreach edit error:', err);
       await ctx.answerCbQuery('Error — check logs').catch(() => {});
@@ -625,42 +651,12 @@ function registerCallbacks() {
       }
       await ctx.answerCbQuery('Tell me what to change');
       await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      pendingEdit = { type: 'thread', id: threadId };
       await sendMessage(
         `✏️ *Editing draft #${threadId}*\n\nWhat would you like to change? Describe the changes and I'll rewrite it.\n\n` +
         `e.g. "make it shorter", "remove the upsell", "more casual tone", "ask about their lap times instead"`,
         'Markdown'
       );
-
-      bot.on('text', async function editHandler(editCtx) {
-        if (String(editCtx.chat?.id) !== CHAT_ID()) return;
-        bot.off('text', editHandler);
-
-        const instructions = editCtx.message.text;
-        await sendMessage('🔄 Rewriting...');
-
-        try {
-          const rewritten = await emailBrain.rewriteEmail({
-            subject: thread.subject,
-            body: thread.body,
-            instructions,
-          });
-
-          db.updateThreadBody(threadId, rewritten.body);
-          db.updateThreadSubject(threadId, rewritten.subject);
-          db.updateThreadStatus(threadId, 'pending_approval');
-
-          const updatedThread = db.getThread(threadId);
-          const contact = db.getContact(thread.contact_id);
-          await sendApprovalRequest(contact, updatedThread);
-        } catch (err) {
-          console.error('[Telegram] AI rewrite failed:', err);
-          await sendMessage(`❌ Rewrite failed: ${err.message}`);
-          // Re-send original for approval so they can try again
-          db.updateThreadStatus(threadId, 'pending_approval');
-          const contact = db.getContact(thread.contact_id);
-          await sendApprovalRequest(contact, thread);
-        }
-      });
     } catch (err) {
       console.error('[Telegram] Edit callback error:', err);
       await ctx.answerCbQuery('Error — check logs').catch(() => {});
