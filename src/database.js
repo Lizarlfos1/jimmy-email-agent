@@ -309,6 +309,12 @@ function updateThreadBody(id, body) {
   ).run(body, id);
 }
 
+function updateThreadSubject(id, subject) {
+  db.prepare(
+    "UPDATE email_threads SET subject = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(subject, id);
+}
+
 function getThreadByTelegramId(telegramMessageId) {
   return db.prepare(
     'SELECT * FROM email_threads WHERE telegram_message_id = ?'
@@ -404,6 +410,12 @@ function updateBroadcastBody(id, body) {
   db.prepare(
     "UPDATE broadcasts SET body = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(body, id);
+}
+
+function updateBroadcastSubject(id, subject) {
+  db.prepare(
+    "UPDATE broadcasts SET subject = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(subject, id);
 }
 
 function updateBroadcastProgress(id, sentCount, failedCount) {
@@ -624,6 +636,12 @@ function updateColdOutreachBatchBody(id, body) {
   ).run(body, id);
 }
 
+function updateColdOutreachBatchSubject(id, subject) {
+  db.prepare(
+    "UPDATE cold_outreach_batches SET subject = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(subject, id);
+}
+
 function updateColdOutreachBatchProgress(id, sentCount, failedCount) {
   db.prepare(
     "UPDATE cold_outreach_batches SET sent_count = ?, failed_count = ?, updated_at = datetime('now') WHERE id = ?"
@@ -822,6 +840,7 @@ module.exports = {
   updateThreadTelegramId,
   updateThreadSesId,
   updateThreadBody,
+  updateThreadSubject,
   getThreadByTelegramId,
   updateContactLastEmailSent,
   updateContactLastEmailReceived,
@@ -832,6 +851,7 @@ module.exports = {
   updateBroadcastStatus,
   updateBroadcastTelegramId,
   updateBroadcastBody,
+  updateBroadcastSubject,
   updateBroadcastProgress,
   getPendingBroadcast,
   getStats,
@@ -849,6 +869,7 @@ module.exports = {
   updateColdOutreachBatchStatus,
   updateColdOutreachBatchTelegramId,
   updateColdOutreachBatchBody,
+  updateColdOutreachBatchSubject,
   updateColdOutreachBatchProgress,
   getPendingColdOutreachBatch,
   addColdOutreachContact,

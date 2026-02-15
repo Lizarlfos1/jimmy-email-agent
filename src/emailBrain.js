@@ -294,4 +294,22 @@ async function callClaude(userPrompt) {
   };
 }
 
-module.exports = { init, generateReply, generateOutreach, generateBroadcast, generateColdOutreach, generateColdFollowup };
+async function rewriteEmail({ subject, body, instructions }) {
+  const userPrompt = `You are editing an existing email draft based on the user's instructions.
+
+CURRENT EMAIL:
+Subject: ${subject}
+Body:
+${body}
+
+USER'S EDIT INSTRUCTIONS:
+${instructions}
+
+Rewrite the email incorporating the user's requested changes. Keep everything else the same unless the instructions say otherwise. The tone should remain the same unless asked to change it.
+
+Respond in JSON: { "subject": "...", "body": "...", "reasoning": "brief note on what you changed" }`;
+
+  return callClaude(userPrompt);
+}
+
+module.exports = { init, generateReply, generateOutreach, generateBroadcast, generateColdOutreach, generateColdFollowup, rewriteEmail };
