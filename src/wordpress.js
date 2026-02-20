@@ -21,6 +21,7 @@ async function wpFetch(endpoint, auth) {
     headers: {
       'Authorization': auth || WP_AUTH(),
       'Content-Type': 'application/json',
+      'User-Agent': 'JimmyEmailAgent/1.0',
     },
   });
   if (!res.ok) {

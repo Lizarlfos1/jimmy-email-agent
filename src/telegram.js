@@ -28,14 +28,14 @@ function init() {
   });
 
   // Handle pending edit instructions (must be before command registration)
-  bot.on('text', async (ctx) => {
-    if (!pendingEdit) return; // no pending edit, let other handlers run
-    if (String(ctx.chat?.id) !== CHAT_ID()) return;
+  bot.on('text', async (ctx, next) => {
+    if (!pendingEdit) return next(); // no pending edit, let other handlers run
+    if (String(ctx.chat?.id) !== CHAT_ID()) return next();
 
     // If the message is a command, cancel the edit and let commands handle it
     if (ctx.message.text.startsWith('/')) {
       pendingEdit = null;
-      return;
+      return next();
     }
 
     const edit = pendingEdit;
