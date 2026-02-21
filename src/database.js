@@ -430,6 +430,14 @@ function getPendingBroadcast() {
   ).get();
 }
 
+function getRecentBroadcastTopics(limit = 6) {
+  return db.prepare(
+    `SELECT subject, body, created_at FROM broadcasts
+     WHERE status IN ('sent', 'pending_approval', 'approved', 'sending')
+     ORDER BY created_at DESC LIMIT ?`
+  ).all(limit);
+}
+
 // --- Stats ---
 
 function getStats() {
@@ -854,6 +862,7 @@ module.exports = {
   updateBroadcastSubject,
   updateBroadcastProgress,
   getPendingBroadcast,
+  getRecentBroadcastTopics,
   getStats,
   createTrackingToken,
   getTrackingByToken,

@@ -310,7 +310,19 @@ async function generateBroadcast() {
   ].join('\n- ');
 
   // Build the style-specific prompt
-  const userPrompt = style.buildPrompt(tipContext, ctaOptions);
+  let userPrompt = style.buildPrompt(tipContext, ctaOptions);
+
+  // Inject recent broadcast topics so Claude avoids repeating content
+  const recentBroadcasts = db.getRecentBroadcastTopics(6);
+  if (recentBroadcasts.length > 0) {
+    const recentTopics = recentBroadcasts.map(b => {
+      // Extract first 150 chars of body to capture the topic without bloating the prompt
+      const snippet = b.body.slice(0, 150).replace(/\n/g, ' ');
+      return `- "${b.subject}" (${b.created_at}): ${snippet}...`;
+    }).join('\n');
+    userPrompt += `\n\nRECENT BROADCASTS (DO NOT repeat these topics or angles — pick something DIFFERENT):
+${recentTopics}`;
+  }
 
   // Inject self-learning insights if available
   const insights = db.getSetting('self_learning_insights');
