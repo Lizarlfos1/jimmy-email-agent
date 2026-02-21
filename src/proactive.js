@@ -195,15 +195,15 @@ async function generateBroadcast({ testEmails } = {}) {
   const broadcast = db.createBroadcast({
     subject: draft.subject,
     body: draft.body,
-    claudeReasoning: draft.reasoning,
+    claudeReasoning: `[Style: ${draft.styleUsed || 'Default'}] ${draft.reasoning}`,
     totalContacts: testEmails ? testEmails.length : contacts.length,
   });
 
   if (testEmails) {
-    console.log(`[Broadcast] Generated TEST #${broadcast.id} for ${testEmails.length} test email(s)`);
+    console.log(`[Broadcast] Generated TEST #${broadcast.id} (${draft.styleUsed}) for ${testEmails.length} test email(s)`);
     await telegram.sendTestBroadcastApproval(broadcast, testEmails);
   } else {
-    console.log(`[Broadcast] Generated #${broadcast.id} for ${contacts.length} contacts`);
+    console.log(`[Broadcast] Generated #${broadcast.id} (${draft.styleUsed}) for ${contacts.length} contacts`);
     await telegram.sendBroadcastApproval(broadcast);
   }
   return broadcast;

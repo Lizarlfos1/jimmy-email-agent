@@ -113,8 +113,188 @@ This is a PROACTIVE outreach email — the customer hasn't emailed us. Write a p
   return callClaude(fullPrompt);
 }
 
+// Broadcast email style templates — rotates between 3 styles
+const BROADCAST_STYLES = [
+  // Style 0: Educational Email
+  {
+    name: 'Educational',
+    buildPrompt: (tipContext, ctaOptions) => `Write a BROADCAST email using the EDUCATIONAL style. This goes to Jimmy's entire mailing list (mix of customers and non-customers).
+
+CTA OPTIONS (pick the ONE that best fits the topic of this email):
+- ${ctaOptions}
+
+REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and write about it in Jimmy's voice):
+${tipContext}
+
+STRUCTURE — Follow this EXACT format:
+1. Start with a "Words I like:" line — a short, punchy quote or one-liner related to the topic. Something memorable.
+2. Then a 1-sentence problem statement — what's the issue most sim racers face?
+3. "Why it matters:" — 1 sentence that raises the stakes or consequence of not fixing it.
+4. "The tactic:" — The 1 clear thing to do, in 1-3 sentences.
+5. "How to do it today:" — 3 numbered steps they can apply immediately.
+6. Sign off as Jimmy.
+7. CTA line: pick the best fit from CTA OPTIONS. Keep it one line.
+8. PS: Either a second free resource link OR a second CTA.
+
+EXAMPLE FORMAT (don't copy content — match the structure):
+"""
+Words I like: "Slow in, fast out isn't about going slow — it's about being precise where it matters most."
+
+Most sim racers think corner entry is about braking later. But the real problem is they're not looking far enough ahead.
+
+Why it matters: If your eyes are glued to the car's nose, your brain is reacting to things that already happened.
+
+The tactic: Force your eyes to the furthest visible point on track. The corner will "slow down" within 3-5 laps.
+
+How to do it today:
+1. Pick one corner you struggle with
+2. Consciously look at the apex while braking, then shift to the exit before turn-in
+3. Repeat for 10 laps — notice how much calmer the corner feels
+
+Jimmy
+
+If you want the full framework for vision and technique, check out Sim Racing University: [URL]
+
+PS: I also put together a free trail braking guide — grab it here: [URL]
+"""
+
+IMPORTANT:
+- This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
+- Keep it 100-200 words (excluding the CTA and PS lines).
+- The "Words I like" quote should feel authentic and insightful — not generic motivational fluff.
+- The 3 steps should be specific and actionable, not vague.
+- The tip should feel like genuine value from Jimmy's actual teaching, not generic advice.`,
+  },
+
+  // Style 1: Case Study Email
+  {
+    name: 'Case Study',
+    buildPrompt: (tipContext, ctaOptions) => `Write a BROADCAST email using the CASE STUDY style. This goes to Jimmy's entire mailing list (mix of customers and non-customers).
+
+CTA OPTIONS (pick the ONE that best fits the topic of this email):
+- ${ctaOptions}
+
+REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and build a scenario around it):
+${tipContext}
+
+STRUCTURE — Follow this EXACT format:
+1. Start with a "Words I like:" line — a short quote that frames the lesson.
+2. Then a HEADLINE — the core idea in 3-6 words (bold/standalone line).
+3. Write a short STORY or real scenario in 4-8 sentences. Keep it practical, direct, and slightly conversational. Explain what the problem was, what was done differently, and what happened as a result. This can be about Jimmy, a driver he coached, or a relatable situation. Make it feel real.
+4. "Takeaway:" — Summarize the lesson in 1-3 sentences. Make it feel like a rule someone can apply immediately.
+5. CTA: One clear action step. Examples: "Try this in your next session." / "Reply and tell me what you think." / "If you want help applying this, grab the guide here: [LINK]"
+6. A short punchy closer line (e.g. "Go faster." / "See you on track." / "Do it today.")
+7. Sign off as Jimmy.
+8. PS: Optional one-liner that reinforces the emotional payoff or outcome.
+
+EXAMPLE FORMAT (don't copy content — match the structure):
+"""
+Words I like: "When it's easy, do more. When it's hard, do different."
+
+Double Sessions
+
+My practice used to feel slow. I'd do one session a day and wonder why I wasn't improving.
+
+So I started doing two focused sessions instead of one long one. First session: work on one specific thing. Second session: put the full lap together.
+
+The difference was immediate. Instead of aimlessly lapping, I had two clear objectives. Every day became two days of improvement.
+
+If you're stuck on a plateau, it's probably not talent — it's structure.
+
+Takeaway: Split your practice into two focused blocks. Pick ONE technique to isolate, then run full laps applying it. You'll improve twice as fast.
+
+Try this in your next session — reply and tell me what you worked on.
+
+See you on track.
+
+Jimmy
+
+PS: The feeling when you nail a corner you've been struggling with for weeks — nothing beats it.
+"""
+
+IMPORTANT:
+- This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
+- Keep the story section 4-8 sentences. Total body 100-200 words.
+- The story should feel REAL and specific — not hypothetical or generic. Use concrete details (lap times, corner numbers, specific techniques).
+- The takeaway should be a clear, quotable rule.`,
+  },
+
+  // Style 2: Story-Based Email
+  {
+    name: 'Story-Based',
+    buildPrompt: (tipContext, ctaOptions) => `Write a BROADCAST email using the STORY-BASED style. This goes to Jimmy's entire mailing list (mix of customers and non-customers).
+
+CTA OPTIONS (pick the ONE that best fits the topic of this email):
+- ${ctaOptions}
+
+REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and build a story around the lesson):
+${tipContext}
+
+STRUCTURE — Follow this EXACT format:
+1. Start with a "Words I like:" line — a short, memorable quote.
+2. Then a TITLE — the lesson name (standalone line).
+3. 1-2 sentences setting the scene (when/where/who).
+4. What went wrong — the problem or mistake.
+5. What was done about it — the fix, insight, or counterintuitive move.
+6. The result/outcome — what changed.
+7. "This taught me an important lesson:" followed by ONE bold rule/principle in quotes.
+8. "How to use it:" with 3 bullet points (practical tips).
+9. CTA: One simple action (try it today / reply / grab the guide: [LINK]).
+10. Short punchy closing line.
+11. Sign off as Jimmy.
+12. PS: Optional one-liner.
+
+EXAMPLE FORMAT (don't copy content — match the structure):
+"""
+Words I like: "The fastest drivers look like they're going slowly. The slowest drivers look like they're in a movie."
+
+The Overdriving Trap
+
+I was coaching a driver last year who was incredibly fast in sector 1 but always lost time in sectors 2 and 3.
+
+He was overdriving — pushing past the grip limit in every corner, sliding through apexes, overheating tyres. He'd exit each corner a few km/h slower without realising it.
+
+I told him to try something counterintuitive: drive at 90% effort for 5 laps. Just focus on being smooth and hitting every apex cleanly.
+
+His lap time dropped by 0.8 seconds. Less effort, more speed.
+
+This taught me an important lesson:
+
+"Driving at 90% is faster than driving at 110%."
+
+How to use it:
+- Pick your worst sector and drive it at 8/10 effort for 5 laps
+- Focus on clean apexes and smooth inputs — not raw speed
+- Compare your sector times to your "try-hard" laps
+
+If you want a structured approach to this, grab the free 3 Must-Know Driving Drills PDF: [URL]
+
+Smooth is fast.
+
+Jimmy
+
+PS: You'd be surprised how much time is hiding in the corners you think you're already good at.
+"""
+
+IMPORTANT:
+- This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
+- Keep it 100-200 words total.
+- The story must feel REAL and personal — like Jimmy is telling you about something that actually happened. Use specific details.
+- The "lesson" line should be bold and memorable — something they'll remember.
+- The 3 tips should be immediately actionable.`,
+  },
+];
+
 // Generate a broadcast email (same email sent to all contacts)
 async function generateBroadcast() {
+  // Determine which style to use — rotate 0→1→2→0→1→2...
+  const lastStyleRaw = db.getSetting('broadcast_style_index');
+  const lastStyle = lastStyleRaw !== null ? parseInt(lastStyleRaw, 10) : -1;
+  const styleIndex = (lastStyle + 1) % BROADCAST_STYLES.length;
+  const style = BROADCAST_STYLES[styleIndex];
+
+  console.log(`[Broadcast] Using style ${styleIndex}: ${style.name}`);
+
   // Pull 5 random tips from the course content for variety
   const tips = getRandomTips(5);
   const tipContext = formatTipsForPrompt(tips);
@@ -125,34 +305,12 @@ async function generateBroadcast() {
     `PAID: Sim Racing University — $89.95 — ${products.university.url}`,
     `FREE: ${leadMagnets.trail_braking_pdf.name} — ${leadMagnets.trail_braking_pdf.url}`,
     `FREE: ${leadMagnets.driving_drills_pdf.name} — ${leadMagnets.driving_drills_pdf.url}`,
+    `FREE: ${leadMagnets.steering_technique_pdf.name} — ${leadMagnets.steering_technique_pdf.url}`,
     `FREE: ${leadMagnets.throttle_audit.name} — ${leadMagnets.throttle_audit.description} — ${leadMagnets.throttle_audit.url}`,
   ].join('\n- ');
 
-  const userPrompt = `Write a BROADCAST email that goes to Jimmy's entire mailing list (mix of customers and non-customers).
-
-CTA OPTIONS (pick the ONE that best fits the topic of this email):
-- ${ctaOptions}
-
-REFERENCE MATERIAL FROM JIMMY'S COURSE (pick ONE topic and write about it in Jimmy's voice):
-${tipContext}
-
-STRUCTURE:
-1. Pick ONE topic from the reference material above. Use the insight and actionable tip as your foundation, but rewrite it in Jimmy's casual, conversational email voice. Don't copy it verbatim — adapt and expand on it naturally.
-2. End the main content with an OPEN LOOP QUESTION — something that invites them to reply. Make it related to the topic. Examples: "What track are you struggling with most right now?", "Have you ever noticed this happening in your driving?", "What's the one thing holding you back from being consistently fast?"
-3. Sign off as Jimmy.
-4. AFTER the sign-off, add a short CTA on its own line. Pick whichever option from the CTA OPTIONS above fits the email topic best. Examples:
-   "Want to get faster? Check out Sim Racing University: ${products.university.url}"
-   "Want the theory behind the technique? Grab Precision Racing: ${products.book.url}"
-   "Want to nail your trail braking? Grab my free guide: ${leadMagnets.trail_braking_pdf.url}"
-   "Try these 3 drills in your next session: ${leadMagnets.driving_drills_pdf.url}"
-   "Find out what's costing you time on corner exit — try the free Throttle Audit: ${leadMagnets.throttle_audit.url}"
-   Alternate between free and paid CTAs — don't always push a product. Match the CTA to the topic.
-
-IMPORTANT:
-- This is NOT personalized — it goes to everyone. Don't reference any specific customer details.
-- Keep it 100-150 words (excluding the CTA line).
-- The tip should feel like genuine value from Jimmy's actual teaching, not generic advice.
-- The open loop question should feel natural, not forced.`;
+  // Build the style-specific prompt
+  const userPrompt = style.buildPrompt(tipContext, ctaOptions);
 
   // Inject self-learning insights if available
   const insights = db.getSetting('self_learning_insights');
@@ -160,7 +318,12 @@ IMPORTANT:
     ? userPrompt + `\n\nPERFORMANCE INSIGHTS (learned from past email data — follow these patterns):\n${insights}`
     : userPrompt;
 
-  return callClaude(fullPrompt);
+  const result = await callClaude(fullPrompt);
+
+  // Save the style index so next broadcast uses the next style
+  db.setSetting('broadcast_style_index', String(styleIndex));
+
+  return { ...result, styleUsed: style.name };
 }
 
 // Generate cold outreach email for non-purchasers (batch — same email for all)
