@@ -453,6 +453,37 @@ app.get('/t/click/:token', (req, res) => {
   res.redirect(302, originalUrl);
 });
 
+// --- Unsubscribe ---
+app.get('/unsubscribe/:token', (req, res) => {
+  try {
+    const trackingRecord = db.getTrackingByToken(req.params.token);
+    if (!trackingRecord) {
+      return res.status(400).send(`
+        <html><body style="font-family: sans-serif; text-align: center; padding: 60px;">
+          <h2>Invalid unsubscribe link</h2>
+          <p>This link is no longer valid. Please reply to any email and ask to be removed.</p>
+        </body></html>
+      `);
+    }
+
+    const contact = db.getContact(trackingRecord.contact_id);
+    if (contact) {
+      db.blacklistContact(contact.email);
+      telegram.sendMessage(`📭 ${contact.name || contact.email} unsubscribed via email link.`).catch(() => {});
+    }
+
+    res.send(`
+      <html><body style="font-family: sans-serif; text-align: center; padding: 60px;">
+        <h2>You've been unsubscribed</h2>
+        <p>You won't receive any more emails from us. Sorry to see you go!</p>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('[Unsubscribe] Error:', err.message);
+    res.status(500).send('Something went wrong. Please reply to any email and ask to be removed.');
+  }
+});
+
 // --- Start ---
 async function start() {
   // Initialize all modules

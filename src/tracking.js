@@ -46,12 +46,17 @@ function buildTrackedHtml({ body, token, campaign }) {
   // Convert newlines to <br> for HTML rendering
   html = html.replace(/\n/g, '<br>\n');
 
-  // Wrap in minimal HTML structure with tracking pixel
+  // Wrap in minimal HTML structure with tracking pixel and unsubscribe link
+  const unsubscribeUrl = `${baseUrl}/unsubscribe/${token}`;
   html = `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; line-height: 1.5; color: #333;">
 ${html}
+<br><br>
+<div style="font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px;">
+<a href="${unsubscribeUrl}" style="color: #999;">Unsubscribe</a>
+</div>
 <img src="${baseUrl}/t/open/${token}" width="1" height="1" alt="" style="display:none;" />
 </body>
 </html>`;
